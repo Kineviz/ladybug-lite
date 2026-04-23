@@ -302,7 +302,7 @@ There are three workflows in [`.github/workflows/`](../.github/workflows/):
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | [`build.yaml`](../.github/workflows/build.yaml) | push / PR to `release`, manual | Matrix `{amd64, arm64}` on Ubuntu runners. Builds Alpine `.node` inside `node:22-alpine` container, copies to `prebuilt/`, runs `util/test.js` smoke test in Alpine, commits `prebuilt/*.node + *.js + package.json` to the release branch, tags with the upstream version (`0.15.3` etc.), publishes via `yarn build`. |
-| [`buildMacOsIntel.yaml`](../.github/workflows/buildMacOsIntel.yaml) | push / PR to `release`, manual | Single job on `macos-26-intel`. Compiles `lbug-source/tools/nodejs_api` from source (upstream ships no darwin-x64), copies the result to `prebuilt/lbugjs-darwin-x64.node`, runs `util/test.js` natively, commits/tags/publishes the same way `build.yaml` does. Races with `build.yaml` on push/tag — the `merge -X ours` strategy and `npm publish` no-op-on-existing handle this safely. |
+| [`buildMacOsIntel.yaml`](../.github/workflows/buildMacOsIntel.yaml) | push / PR to `release`, manual | Single job on `macos-26-intel`. Compiles `tools/nodejs_api` from source (upstream ships no darwin-amd64/x64 prebuilt), copies the result to `prebuilt/lbugjs-darwin-amd64.node`, runs `util/test.js` natively, commits/tags/publishes the same way `build.yaml` does. Races with `build.yaml` on push/tag — the `merge -X ours` strategy and `npm publish` no-op-on-existing handle this safely. |
 | [`buildExtension.yaml`](../.github/workflows/buildExtension.yaml) | push / PR to `release`, manual | Matrix `{amd64, arm64}`. Runs `util/buildLadybugExtensions.sh` inside `node:22-alpine`, force-pushes the resulting `extensions/*/*.lbug_extension` files. |
 | [`daily.yaml`](../.github/workflows/daily.yaml) | cron `0 0 * * *` | Compares `npm view @ladybugdb/core version` vs `npm view @kineviz/ladybug-lite version`. If upstream is newer, opens an issue and triggers `build.yaml` via `workflow_dispatch`. **Note:** does not currently dispatch `buildMacOsIntel.yaml` — Intel Mac binaries piggyback on the next manual or PR-triggered run. |
 
@@ -332,20 +332,23 @@ runtime and want to avoid rewriting the repo root.
 
 | File | Built by | Notes |
 | --- | --- | --- |
-| `lbugjs-linux-x64.node` | upstream `@ladybugdb/core` | Copied from `node_modules/@ladybugdb/core/prebuilt/` |
-| `lbugjs-linux-arm64.node` | upstream | same |
+All `-amd64` filenames cover x86_64 / Node's `x64` arch; the `amd64` spelling
+is canonical throughout this repo (install.js, copy.js, and build.js all
+normalize Node's `x64` to `amd64` before path lookups).
+
+| File | Built by | Notes |
+| --- | --- | --- |
+| `lbugjs-linux-amd64.node` | upstream `@ladybugdb/core` sub-package `core-linux-x64` | Copied from `node_modules/@ladybugdb/core-linux-x64/`, renamed `-x64` → `-amd64` by `build.js` |
+| `lbugjs-linux-arm64.node` | upstream | same, no rename needed |
 | `lbugjs-darwin-arm64.node` | upstream | Apple Silicon |
-| `lbugjs-darwin-x64.node` | **us** (`buildMacOsIntel.yaml`, `macos-26-intel` runner) | Built from source; upstream does not ship Intel Mac for 0.15.x |
-| `lbugjs-win32-x64.node` | upstream | |
+| `lbugjs-darwin-amd64.node` | **us** (`buildMacOsIntel.yaml`, `macos-26-intel` runner) | Built from source; upstream does not ship Intel Mac for 0.15.x |
+| `lbugjs-win32-amd64.node` | upstream | same rename as linux |
 | `lbugjs-alpine-amd64.node` | **us** (`buildLadybugWithDocker.sh` / `build.yaml`) | musl libc |
 | `lbugjs-alpine-arm64.node` | **us** | musl libc |
 
-**Time-bounded support:** `darwin-x64` (Intel Mac) depends on the
+**Time-bounded support:** Intel Mac (`darwin-amd64`) depends on the
 `macos-26-intel` GitHub-hosted runner, which Apple/GitHub will retire in
 Fall 2027. After that, Intel Mac users must build from source locally.
-
-The naming inconsistency between `linux-x64` (Node arch) and `alpine-amd64`
-(Docker arch) is historical and is normalized by `install.js` — see §5.2.
 
 ---
 

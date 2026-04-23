@@ -1,11 +1,11 @@
 name: Build Ladybug Lite for macOS Intel
 
-# Independent build + publish pipeline for darwin-x64.
+# Independent build + publish pipeline for darwin-amd64.
 #
 # Why a separate workflow (not a matrix entry in build.yaml):
 #   - Runner OS differs (macOS, not Linux), so it can't share the docker-based
 #     build steps used for Alpine targets.
-#   - Upstream @ladybugdb/core does NOT ship a darwin-x64 prebuilt for 0.15.x,
+#   - Upstream @ladybugdb/core does NOT ship a darwin-amd64 prebuilt for 0.15.x,
 #     so we must compile lbug-source/tools/nodejs_api from source on a real
 #     Intel Mac runner.
 #   - macos-26-intel is GitHub's last x86_64 macOS image (Apple Silicon only
@@ -20,15 +20,15 @@ on:
 
 jobs:
   build:
-    name: Build on darwin-x64
+    name: Build on darwin-amd64
     runs-on: macos-26-intel
     environment: TOKENS
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '22'
 
@@ -43,7 +43,7 @@ jobs:
         echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
 
     - name: Install @ladybugdb/core
-      # @ladybugdb/core@0.15.x has no darwin-x64 sub-package and no longer
+      # @ladybugdb/core@0.15.x has no darwin-amd64 sub-package and no longer
       # ships lbug-source/ in the tarball, so its install.js would fail with a
       # misleading /bin/sh ENOENT on this runner. Skip scripts; the source is
       # fetched by `yarn clone:source` in the next step.
@@ -57,10 +57,10 @@ jobs:
         LBUG_SUBMODULES: tools/nodejs_api
       run: yarn clone:source
 
-    - name: Build lbugjs.node from source (darwin-x64)
+    - name: Build lbugjs.node from source (darwin-amd64)
       env:
         LBUG_SOURCE_DIR: ${{ github.workspace }}/lbug-src
-        OUTPUT_PATH: ${{ github.workspace }}/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-x64.node
+        OUTPUT_PATH: ${{ github.workspace }}/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-amd64.node
       run: yarn build:native
 
     - name: Configure npm authentication
@@ -71,22 +71,33 @@ jobs:
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: yarn build
 
-    - name: Test natively (darwin-x64)
+    - name: Test natively (darwin-amd64)
       id: native_test
       run: |
-        cp -f prebuilt/lbugjs-darwin-x64.node lbugjs.node
+        cp -f prebuilt/lbugjs-darwin-amd64.node lbugjs.node
         cd util && node ./test.js || echo "test_failed=true" >> $GITHUB_OUTPUT
 
     - name: Merge and push changes
+      # Retry loop to absorb transient GitHub 500s and races with the sibling
+      # Linux/Extensions jobs.
       run: |
         export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
         git add prebuilt/*.node *.js package.json || true
-        git commit -m "Add compiled lbugjs-darwin-x64.node for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
-        git fetch origin ${{ github.ref }}
-        git merge -X ours origin/${{ github.ref_name }} --no-edit || true
-        git push
+        git commit -m "Add compiled lbugjs-darwin-amd64.node for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
+        for attempt in 1 2 3 4 5; do
+          git fetch origin ${{ github.ref }} || true
+          git merge -X ours origin/${{ github.ref_name }} --no-edit || true
+          if git push; then
+            echo "Pushed on attempt $attempt."
+            exit 0
+          fi
+          echo "Push attempt $attempt failed, sleeping 15s before retry..."
+          sleep 15
+        done
+        echo "git push failed after 5 attempts." >&2
+        exit 1
 
     - name: Tag with version
       run: |

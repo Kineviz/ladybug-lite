@@ -23,10 +23,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '22'
 
@@ -57,12 +57,25 @@ jobs:
         "
 
     - name: Reset and force push changes
+      # `git add extensions/` (directory form) is more reliable than the old
+      # extensions/*/*.ext glob, which depends on shell expansion finding
+      # matches on disk BEFORE git sees the pathspec. If the directory is
+      # empty, `git add` is a no-op (no pathspec error).
       run: |
         export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
         git fetch origin ${{ github.ref }}
         git reset --hard origin/${{ github.ref_name }}
-        git add extensions/*/*.lbug_extension extensions/*/*.kuzu_extension 2>/dev/null || true
+        git add extensions/ 2>/dev/null || true
         git commit -m "Add compiled lbug extension for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
-        git push --force
+        for attempt in 1 2 3 4 5; do
+          if git push --force; then
+            echo "Pushed on attempt $attempt."
+            exit 0
+          fi
+          echo "Push attempt $attempt failed, sleeping 15s before retry..."
+          sleep 15
+        done
+        echo "git push failed after 5 attempts." >&2
+        exit 1

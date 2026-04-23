@@ -101,7 +101,7 @@ const npmPublish = (package) => {
 /**
  * Copies any lbugjs-*.node binaries that CI wrote into
  * node_modules/@ladybugdb/core/prebuilt/ up into ./prebuilt/ at the repo root.
- * This covers freshly-built artifacts on every platform (darwin-x64 and the
+ * This covers freshly-built artifacts on every platform (darwin-amd64 and the
  * Alpine arm64 build would otherwise never make it to the committed prebuilt/
  * directory, since copyPrebuiltBinaries below is gated to linux-x64/win32).
  */

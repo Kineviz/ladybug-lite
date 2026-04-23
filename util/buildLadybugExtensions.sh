@@ -85,10 +85,24 @@ else
 fi
 
 # Collect the built extensions into an output dir the publish pipeline can
-# pick up. Default to $APP_ROOT_DIR/extensions/alpine-$ARCH so the
-# buildExtension.yaml `git add extensions/*/*.lbug_extension` glob matches.
+# pick up. Default to $APP_ROOT_DIR/extensions/alpine-$ARCH.
 EXTENSION_DIST_DIR="${EXTENSION_OUTPUT_DIR:-$APP_ROOT_DIR/extensions/alpine-$ARCH}"
 mkdir -p "$EXTENSION_DIST_DIR"
-find "${LBUG_SOURCE_DIR}/extension" -type f \( -path "*/build/*.lbug_extension" -o -path "*/build/*.kuzu_extension" \) -exec cp {} "$EXTENSION_DIST_DIR" \;
 
-echo "All extensions have been copied to the $EXTENSION_DIST_DIR directory"
+# Use -name rather than -path with globbing. The prior -path "*/build/*.ext"
+# pattern silently matched zero files under Alpine's busybox find even though
+# the artifacts existed at extension/<name>/build/lib<name>.lbug_extension.
+# -name is simpler and produced the same result set on the test run.
+copied=0
+for ext in $(find "${LBUG_SOURCE_DIR}/extension" -type f \( -name "*.lbug_extension" -o -name "*.kuzu_extension" \)); do
+    cp -f "$ext" "$EXTENSION_DIST_DIR/"
+    echo "Copied: $ext -> $EXTENSION_DIST_DIR/"
+    copied=$((copied + 1))
+done
+
+if [ "$copied" -eq 0 ]; then
+    echo "Error: No .lbug_extension or .kuzu_extension artifacts found under ${LBUG_SOURCE_DIR}/extension. Did the cmake build produce any?" >&2
+    exit 1
+fi
+
+echo "$copied extension artifact(s) have been copied to the $EXTENSION_DIST_DIR directory"

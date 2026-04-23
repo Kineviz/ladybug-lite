@@ -22,10 +22,10 @@ jobs:
             runner: ubuntu-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '22'
 
@@ -76,15 +76,28 @@ jobs:
           " || echo "test_failed=true" >> $GITHUB_OUTPUT
 
     - name: Merge and push changes
+      # Retry loop: both the Linux matrix jobs and the macOS/Extensions jobs
+      # push to this same branch around the same time. Transient GitHub 500s
+      # and non-fast-forward rejections (from a sibling job winning the race)
+      # both show up here; rebasing each attempt handles both.
       run: |
         export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
         git add prebuilt/*.node *.js package.json || true
         git commit -m "Add compiled lbugjs-alpine-${{ matrix.arch }}.node for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
-        git fetch origin ${{ github.ref }}
-        git merge -X ours origin/${{ github.ref_name }} --no-edit || true
-        git push
+        for attempt in 1 2 3 4 5; do
+          git fetch origin ${{ github.ref }} || true
+          git merge -X ours origin/${{ github.ref_name }} --no-edit || true
+          if git push; then
+            echo "Pushed on attempt $attempt."
+            exit 0
+          fi
+          echo "Push attempt $attempt failed, sleeping 15s before retry..."
+          sleep 15
+        done
+        echo "git push failed after 5 attempts." >&2
+        exit 1
 
     - name: Tag with version
       run: |
