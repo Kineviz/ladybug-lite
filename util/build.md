@@ -15,7 +15,7 @@ docker run -it \
 --name qemu-aarch64-alpine \
 -v ./:/app \
 --platform linux/arm64 \
-node:18-alpine
+node:22-alpine
 
 
  
@@ -25,7 +25,7 @@ docker run -it \
 --platform linux/amd64 \
 -v ./:/app \
 --name qemu-amd64-alpine \
-node:18-alpine
+node:22-alpine
 
 
 

@@ -37,6 +37,8 @@ jobs:
         echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
 
     - name: Clone upstream ladybug source
+      env:
+        LBUG_SUBMODULES: extension
       run: yarn clone:source
 
     - name: Build Ladybug Extensions (${{ matrix.arch }})

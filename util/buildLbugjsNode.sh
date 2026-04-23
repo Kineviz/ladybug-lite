@@ -18,6 +18,15 @@ if [ ! -d "$NODEJS_API_DIR" ]; then
     exit 1
 fi
 
+# tools/nodejs_api is a git submodule upstream. If the clone forgot
+# --recurse-submodules the directory exists but is empty, and yarn silently
+# walks up the tree to the repo-root package.json, running the wrong scripts.
+# Refuse to proceed.
+if [ ! -f "$NODEJS_API_DIR/package.json" ]; then
+    echo "Error: $NODEJS_API_DIR/package.json missing. Did the submodule fail to init? Try re-running with 'git submodule update --init --recursive' in $LBUG_SOURCE_DIR." >&2
+    exit 1
+fi
+
 cd "$NODEJS_API_DIR"
 yarn install
 yarn build

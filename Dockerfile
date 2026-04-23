@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.4
 
 # ----- amd64 构建 -----
-FROM --platform=linux/amd64 node:18-alpine  AS build-amd64
+FROM --platform=linux/amd64 node:22-alpine  AS build-amd64
 WORKDIR /app
 RUN echo "Building for $(uname -m)"
 RUN apk add --no-cache  \
@@ -25,7 +25,7 @@ RUN mkdir -p /app/node_modules/@ladybugdb/core/prebuilt  && \
     cp -f /app/node_modules/@ladybugdb/core/lbug-source/tools/nodejs_api/build/lbugjs.node /app/node_modules/@ladybugdb/core/prebuilt/lbugjs-linux-amd64.node
 
 # ----- arm64 构建 -----
-FROM --platform=linux/arm64 node:18-alpine  AS build-arm64
+FROM --platform=linux/arm64 node:22-alpine  AS build-arm64
 WORKDIR /app
 RUN echo "Building for $(uname -m)"
 RUN apk add --no-cache \

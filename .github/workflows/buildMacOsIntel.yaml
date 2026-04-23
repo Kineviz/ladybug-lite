@@ -53,6 +53,8 @@ jobs:
         echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
 
     - name: Clone upstream ladybug source
+      env:
+        LBUG_SUBMODULES: tools/nodejs_api
       run: yarn clone:source
 
     - name: Build lbugjs.node from source (darwin-x64)

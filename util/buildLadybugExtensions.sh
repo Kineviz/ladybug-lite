@@ -2,6 +2,12 @@
 
 # Script that only compiles Ladybug extensions, supports LBUG_DIR environment variable
 # apk add --no-cache openssl openssl-dev
+
+# Fail fast on any error. Without this, a failed `cmake --build` would let the
+# script continue and print "All extensions copied" even though nothing was
+# produced, making CI silently report success while committing nothing.
+set -e
+
 APP_ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}")/..; pwd)
 # Upstream @ladybugdb/core@0.15.x no longer ships lbug-source/ in the tarball;
 # CI clones the source separately and passes LBUG_SOURCE_DIR. Fall back to the

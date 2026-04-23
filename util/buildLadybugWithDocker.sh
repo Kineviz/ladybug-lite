@@ -42,7 +42,7 @@ run_test() {
     docker run --rm \
         --platform linux/$arch \
         -v "${APP_ROOT_DIR}:/ladybug-lite" \
-        node:18-alpine /bin/sh -c "
+        node:22-alpine /bin/sh -c "
             cd /ladybug-lite && \
             cp -f /ladybug-lite/prebuilt/$node_file /ladybug-lite/lbugjs.node && \
             cd /ladybug-lite/util && \
