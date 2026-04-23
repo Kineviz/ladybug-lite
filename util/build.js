@@ -220,7 +220,10 @@ const rootDir = path.join(__dirname, "..");
 // already install @ladybugdb/core with docker or action
 // installPackage("@ladybugdb/core");
 
-// Delete files before copying new ones
+// Delete files before copying new ones. lbug-src is the upstream clone
+// fetched by util/cloneLbugSource.sh; on Linux CI it contains files created
+// by root inside the Alpine build container and rmdir fails with EACCES, so
+// leave it alone (and it's .gitignored anyway).
 deleteFiles(rootDir, [
   "package.json",
   "util",
@@ -235,7 +238,8 @@ deleteFiles(rootDir, [
   "Dockerfile",
   ".npmignore",
   "docs",
-  "prebuilt"
+  "prebuilt",
+  "lbug-src"
 ]);
 
 const srcDir = path.join(rootDir, "node_modules", "@ladybugdb", "core");

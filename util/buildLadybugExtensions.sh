@@ -50,13 +50,18 @@ fi
 
 echo "Configuring CMake to build only extensions..."
 echo "Source directory: ${LBUG_SOURCE_DIR}"
+# BUILD_LBUG=FALSE alone still pulls in tools/shell, whose printer target has
+# a broken include path (upstream cmake doesn't add src/include when shell is
+# built standalone). BUILD_SHELL=FALSE skips it; upstream install.js uses
+# both flags for the nodejs native addon build.
 cmake "${LBUG_SOURCE_DIR}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_EXTENSIONS="${EXTENSION_LIST}" \
     -DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so \
     -DOPENSSL_SSL_LIBRARY=/usr/lib/libssl.so \
     -DOPENSSL_USE_STATIC_LIBS=OFF \
-    -DBUILD_LBUG=FALSE
+    -DBUILD_LBUG=FALSE \
+    -DBUILD_SHELL=FALSE
 
 CORES=$(nproc --all)
 echo "Using $CORES cores for compilation..."
