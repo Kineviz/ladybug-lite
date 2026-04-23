@@ -1,0 +1,51 @@
+name: Daily Version Check
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 时间 0:00 运行
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check versions
+        id: check_versions
+        run: |
+          LBUG_VERSION=$(npm view @ladybugdb/core version)
+          LADYBUG_LITE_VERSION=$(npm view @kineviz/ladybug-lite version || echo "0.0.0")
+          echo "lbug_version=$LBUG_VERSION" >> $GITHUB_OUTPUT
+          echo "ladybug_lite_version=$LADYBUG_LITE_VERSION" >> $GITHUB_OUTPUT
+
+          if [ "$(printf '%s\n' "$LBUG_VERSION" "$LADYBUG_LITE_VERSION" | sort -V | head -n1)" != "$LBUG_VERSION" ]; then
+            echo "lbug_newer=true" >> $GITHUB_OUTPUT
+            echo "Ladybug version ($LBUG_VERSION) is newer than ladybug-lite ($LADYBUG_LITE_VERSION)"
+          else
+            echo "lbug_newer=false" >> $GITHUB_OUTPUT
+            echo "Ladybug version ($LBUG_VERSION) is not newer than ladybug-lite ($LADYBUG_LITE_VERSION)"
+          fi
+
+      - name: Send notification
+        if: steps.check_versions.outputs.lbug_newer == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const lbug_version = '${{ steps.check_versions.outputs.lbug_version }}';
+            const ladybug_lite_version = '${{ steps.check_versions.outputs.ladybug_lite_version }}';
+
+            // 创建 issue 通知
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `@ladybugdb/core 更新通知: 新版本 ${lbug_version} 可用`,
+              body: `检测到 @ladybugdb/core (${lbug_version}) 比当前的 ladybug-lite (${ladybug_lite_version}) 版本更新。\n\n请考虑更新 ladybug-lite。`,
+              labels: ['version-update']
+            });
+
+            // 主动触发 build.yaml workflow
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build.yaml',
+              ref: context.ref
+            });

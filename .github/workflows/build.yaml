@@ -1,0 +1,92 @@
+name: Build Ladybug Lite
+
+on:
+  push:
+    branches: [ release ]
+  pull_request:
+    branches: [ release ]
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    name: Build on ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    environment: TOKENS
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      run: |
+        yarn cache clean
+        yarn add @ladybugdb/core --force
+        echo "@ladybugdb/core version: $(yarn list @ladybugdb/core | grep @ladybugdb/core)"
+
+    - name: Build in Docker (${{ matrix.arch }})
+      run: |
+        docker run --rm \
+          --platform linux/${{ matrix.arch }} \
+          -v ${{ github.workspace }}/node_modules/@ladybugdb/core:/lbug \
+          node:22-alpine /bin/sh -c "
+            cd /lbug/lbug-source/tools/nodejs_api && \
+            yarn install && \
+            apk add --no-cache g++ build-base python3 openssl-dev make cmake zlib-dev musl-dev && \
+            yarn build && \
+            mkdir -p /lbug/prebuilt && \
+            cp -f  /lbug/lbug-source/tools/nodejs_api/build/lbugjs.node /lbug/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node
+          "
+
+    - name: Configure npm authentication
+      run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKENS }}" > ~/.npmrc
+
+    - name: Copy compiled file to repo directory
+      env:
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        yarn build
+
+    - name: Test in Docker for alpine (${{ matrix.arch }})
+      id: docker_test
+      run: |
+        docker run --rm \
+          --platform linux/${{ matrix.arch }} \
+          -v ${{ github.workspace }}:/ladybug-lite \
+          node:22-alpine /bin/sh -c "
+            cd /ladybug-lite && \
+            cp -f /ladybug-lite/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node /ladybug-lite/lbugjs.node && \
+            cd /ladybug-lite/util && \
+            node ./test.js
+          " || echo "test_failed=true" >> $GITHUB_OUTPUT
+
+    - name: Merge and push changes
+      run: |
+        export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        git add prebuilt/*.node *.js package.json || true
+        git commit -m "Add compiled lbugjs-alpine-${{ matrix.arch }}.node for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
+        git fetch origin ${{ github.ref }}
+        git merge -X ours origin/${{ github.ref_name }} --no-edit || true
+        git push
+
+    - name: Tag with version
+      run: |
+        export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
+        git fetch --tags origin
+        git tag -d "$lbug_version" || true
+        git push origin ":refs/tags/$lbug_version" || true
+        git tag -a "$lbug_version" -m "Release $lbug_version"
+        git push origin "$lbug_version"

@@ -1,0 +1,59 @@
+name: Build Ladybug Extensions
+
+on:
+  push:
+    branches: [ release ]
+  pull_request:
+    branches: [ release ]
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    name: Build on ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    environment: TOKENS
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      run: |
+        yarn cache clean
+        yarn add @ladybugdb/core --force
+        echo "@ladybugdb/core version: $(yarn list @ladybugdb/core | grep @ladybugdb/core)"
+
+    - name: Build Ladybug Extensions (${{ matrix.arch }})
+      run: |
+        docker run --rm \
+        --platform linux/${{ matrix.arch }} \
+        -v ${{ github.workspace }}:/app \
+        node:22-alpine /bin/sh -c "
+          apk add --no-cache bash g++ build-base python3 openssl openssl-dev make cmake zlib-dev musl-dev && \
+          cd /app && \
+          bash ./util/buildLadybugExtensions.sh
+        "
+
+    - name: Reset and force push changes
+      run: |
+        export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        git fetch origin ${{ github.ref }}
+        git reset --hard origin/${{ github.ref_name }}
+        git add extensions/*/*.lbug_extension extensions/*/*.kuzu_extension 2>/dev/null || true
+        git commit -m "Add compiled lbug extension for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
+        git push --force

@@ -1,0 +1,27 @@
+{
+  "name": "@kineviz/ladybug-lite",
+  "version": "0.15.3",
+  "description": "A lightweight fork of the Ladybug (formerly Kùzu) embedded graph database, optimized for faster installation and broader compatibility.",
+  "main": "index.js",
+  "homepage": "https://ladybugdb.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kineviz/ladybug-lite.git"
+  },
+  "scripts": {
+    "build:ladybug": "bash ./util/buildLadybugWithDocker.sh",
+    "build": "node util/build.js",
+    "install": "node util/install.js",
+    "copy": "node util/copy.js",
+    "test": "node util/test.js",
+    "release": "npm publish --access public --registry https://registry.npmjs.org"
+  },
+  "author": "Ladybug Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@ladybugdb/core": "^0.15.3"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^7.0.6"
+  }
+}

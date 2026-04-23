@@ -1,0 +1,9 @@
+.*
+Dockerfile
+prebuilt
+extensions
+util/demo_db
+util/demo_*
+lbugjs.node
+node_modules
+test

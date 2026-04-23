@@ -1,0 +1,7 @@
+node_modules
+demo_db
+demo_*
+*pycache*
+lbugjs.node
+test
+docs/*
