@@ -11,6 +11,33 @@ set -euo pipefail
 : "${LBUG_SOURCE_DIR:?LBUG_SOURCE_DIR is required}"
 : "${OUTPUT_PATH:?OUTPUT_PATH is required}"
 
+APP_ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)
+CORE_PKG_JSON="$APP_ROOT_DIR/node_modules/@ladybugdb/core/package.json"
+
+# Cache check: if prebuilt/<target> already exists in the repo checkout and
+# prebuilt/version matches the currently-installed @ladybugdb/core version,
+# skip the 15-20 minute compile and just copy the cached binary to the
+# expected OUTPUT_PATH. Lets same-version re-runs (e.g. CI reruns triggered
+# by a sibling job's push) finish in seconds instead of ~20 min.
+# Set LBUG_FORCE_REBUILD=1 to bypass.
+CACHED_BIN="$APP_ROOT_DIR/prebuilt/$(basename "$OUTPUT_PATH")"
+VERSION_FILE="$APP_ROOT_DIR/prebuilt/version"
+if [ "${LBUG_FORCE_REBUILD:-0}" != "1" ] \
+    && [ -f "$CACHED_BIN" ] \
+    && [ -f "$VERSION_FILE" ] \
+    && [ -f "$CORE_PKG_JSON" ]; then
+    cached_ver=$(head -n 1 "$VERSION_FILE" | tr -d '[:space:]')
+    target_ver=$(node -p "require('$CORE_PKG_JSON').version")
+    if [ "$cached_ver" = "$target_ver" ]; then
+        echo "Cache hit: $CACHED_BIN already built for v$target_ver, skipping compile."
+        mkdir -p "$(dirname "$OUTPUT_PATH")"
+        cp -f "$CACHED_BIN" "$OUTPUT_PATH"
+        echo "Copied cached binary -> $OUTPUT_PATH"
+        exit 0
+    fi
+    echo "Cache miss (prebuilt/version=$cached_ver, target=$target_ver); rebuilding."
+fi
+
 NODEJS_API_DIR="$LBUG_SOURCE_DIR/tools/nodejs_api"
 
 if [ ! -d "$NODEJS_API_DIR" ]; then

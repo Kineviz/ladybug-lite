@@ -43,15 +43,24 @@ jobs:
     - name: Build lbugjs.node in Docker (${{ matrix.arch }})
       # Delegates to util/buildLbugjsNode.sh inside an Alpine container so
       # build.yaml, buildMacOsIntel.yaml and local dev share one build recipe.
+      # chown at the end: the container runs as root and writes into the
+      # mounted workspace, leaving files the runner user can't touch. Later
+      # steps (`git reset`, `yarn build`'s deleteFiles) then fail with
+      # EACCES / "Permission denied" — this was the round-1/round-2 failure.
       run: |
+        HOST_UID=$(id -u)
+        HOST_GID=$(id -g)
         docker run --rm \
           --platform linux/${{ matrix.arch }} \
           -v ${{ github.workspace }}:/app \
           -e LBUG_SOURCE_DIR=/app/lbug-src \
           -e OUTPUT_PATH=/app/node_modules/@ladybugdb/core/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node \
+          -e HOST_UID="$HOST_UID" \
+          -e HOST_GID="$HOST_GID" \
           node:22-alpine /bin/sh -c "
             apk add --no-cache bash g++ build-base python3 openssl-dev make cmake zlib-dev musl-dev file && \
-            cd /app && bash ./util/buildLbugjsNode.sh
+            cd /app && bash ./util/buildLbugjsNode.sh && \
+            chown -R \$HOST_UID:\$HOST_GID /app/node_modules /app/lbug-src /app/prebuilt 2>/dev/null || true
           "
 
     - name: Configure npm authentication
@@ -80,11 +89,14 @@ jobs:
       # push to this same branch around the same time. Transient GitHub 500s
       # and non-fast-forward rejections (from a sibling job winning the race)
       # both show up here; rebasing each attempt handles both.
+      # prebuilt/version is the cache key used by util/buildLbugjsNode.sh's
+      # early-exit path — bump it whenever the @ladybugdb/core version changes.
       run: |
         export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
-        git add prebuilt/*.node *.js package.json || true
+        echo "$lbug_version" > prebuilt/version
+        git add prebuilt/*.node prebuilt/version *.js package.json || true
         git commit -m "Add compiled lbugjs-alpine-${{ matrix.arch }}.node for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
         for attempt in 1 2 3 4 5; do
           git fetch origin ${{ github.ref }} || true

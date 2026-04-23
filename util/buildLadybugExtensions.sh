@@ -25,6 +25,41 @@ if [ "$SYSTEM" = "Msys" ]; then
     EXTENSION_DIR="$(cygpath -w $EXTENSION_DIR)"
 fi
 
+# Architecture detection (moved above the cache check so $EXTENSION_DIST_DIR
+# can be computed before deciding whether to skip the build).
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+    echo "Detected x86_64 architecture"
+    ARCH="amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+    echo "Detected aarch64 architecture"
+    ARCH="arm64"
+else
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+fi
+EXTENSION_DIST_DIR="${EXTENSION_OUTPUT_DIR:-$APP_ROOT_DIR/extensions/alpine-$ARCH}"
+VERSION_FILE="$APP_ROOT_DIR/extensions/version"
+CORE_PKG_JSON="$APP_ROOT_DIR/node_modules/@ladybugdb/core/package.json"
+
+# Cache check: if extensions/version matches the target @ladybugdb/core
+# version and $EXTENSION_DIST_DIR already contains at least one built
+# artifact, skip the 4-8 minute cmake build. Set LBUG_FORCE_REBUILD=1 to
+# bypass.
+if [ "${LBUG_FORCE_REBUILD:-0}" != "1" ] \
+    && [ -d "$EXTENSION_DIST_DIR" ] \
+    && [ -f "$VERSION_FILE" ] \
+    && [ -f "$CORE_PKG_JSON" ]; then
+    cached_ver=$(head -n 1 "$VERSION_FILE" | tr -d '[:space:]')
+    target_ver=$(node -p "require('$CORE_PKG_JSON').version")
+    existing=$(find "$EXTENSION_DIST_DIR" -maxdepth 1 -type f \( -name "*.lbug_extension" -o -name "*.kuzu_extension" \) 2>/dev/null | wc -l)
+    if [ "$cached_ver" = "$target_ver" ] && [ "$existing" -gt 0 ]; then
+        echo "Cache hit: $existing extension artifact(s) in $EXTENSION_DIST_DIR for v$target_ver, skipping rebuild."
+        exit 0
+    fi
+    echo "Cache miss (extensions/version=$cached_ver, target=$target_ver, artifacts=$existing); rebuilding."
+fi
+
 #EXTENSION_LIST="$(find "${EXTENSION_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | grep -v '^duckdb$' | sort | tr '\n' ';' | sed 's/;$//')"
 EXTENSION_LIST="httpfs;json;fts;vector;neo4j;algo"
 echo "Automatically detected extension list: ${EXTENSION_LIST}"

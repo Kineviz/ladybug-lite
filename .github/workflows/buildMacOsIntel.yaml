@@ -79,12 +79,14 @@ jobs:
 
     - name: Merge and push changes
       # Retry loop to absorb transient GitHub 500s and races with the sibling
-      # Linux/Extensions jobs.
+      # Linux/Extensions jobs. Also writes prebuilt/version so future re-runs
+      # can fast-exit via util/buildLbugjsNode.sh's cache path.
       run: |
         export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
-        git add prebuilt/*.node *.js package.json || true
+        echo "$lbug_version" > prebuilt/version
+        git add prebuilt/*.node prebuilt/version *.js package.json || true
         git commit -m "Add compiled lbugjs-darwin-amd64.node for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
         for attempt in 1 2 3 4 5; do
           git fetch origin ${{ github.ref }} || true
