@@ -42,31 +42,32 @@ jobs:
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
         echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
 
-    - name: Install dependencies
+    - name: Install @ladybugdb/core
+      # @ladybugdb/core@0.15.x has no darwin-x64 sub-package and no longer
+      # ships lbug-source/ in the tarball, so its install.js would fail with a
+      # misleading /bin/sh ENOENT on this runner. Skip scripts; the source is
+      # fetched by `yarn clone:source` in the next step.
       run: |
         yarn cache clean
-        yarn add @ladybugdb/core --force
-        echo "@ladybugdb/core version: $(yarn list @ladybugdb/core | grep @ladybugdb/core)"
+        yarn add @ladybugdb/core --force --ignore-scripts
+        echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
+
+    - name: Clone upstream ladybug source
+      run: yarn clone:source
 
     - name: Build lbugjs.node from source (darwin-x64)
-      run: |
-        cd node_modules/@ladybugdb/core/lbug-source/tools/nodejs_api
-        yarn install
-        yarn build
-        mkdir -p $GITHUB_WORKSPACE/node_modules/@ladybugdb/core/prebuilt
-        cp -f build/lbugjs.node $GITHUB_WORKSPACE/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-x64.node
-        file $GITHUB_WORKSPACE/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-x64.node
+      env:
+        LBUG_SOURCE_DIR: ${{ github.workspace }}/lbug-src
+        OUTPUT_PATH: ${{ github.workspace }}/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-x64.node
+      run: yarn build:native
 
     - name: Configure npm authentication
       run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKENS }}" > ~/.npmrc
 
-    - name: Copy compiled file to repo directory and publish
+    - name: Package for publish
       env:
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: |
-        mkdir -p prebuilt \
-        && cp -f node_modules/@ladybugdb/core/prebuilt/*.node prebuilt/ \
-        && yarn build
+      run: yarn build
 
     - name: Test natively (darwin-x64)
       id: native_test

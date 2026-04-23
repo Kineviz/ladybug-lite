@@ -29,34 +29,36 @@ jobs:
       with:
         node-version: '22'
 
-    - name: Install dependencies
+    - name: Install @ladybugdb/core
       run: |
         yarn cache clean
         yarn add @ladybugdb/core --force
-        echo "@ladybugdb/core version: $(yarn list @ladybugdb/core | grep @ladybugdb/core)"
+        echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
 
-    - name: Build in Docker (${{ matrix.arch }})
+    - name: Clone upstream ladybug source
+      run: yarn clone:source
+
+    - name: Build lbugjs.node in Docker (${{ matrix.arch }})
+      # Delegates to util/buildLbugjsNode.sh inside an Alpine container so
+      # build.yaml, buildMacOsIntel.yaml and local dev share one build recipe.
       run: |
         docker run --rm \
           --platform linux/${{ matrix.arch }} \
-          -v ${{ github.workspace }}/node_modules/@ladybugdb/core:/lbug \
+          -v ${{ github.workspace }}:/app \
+          -e LBUG_SOURCE_DIR=/app/lbug-src \
+          -e OUTPUT_PATH=/app/node_modules/@ladybugdb/core/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node \
           node:22-alpine /bin/sh -c "
-            cd /lbug/lbug-source/tools/nodejs_api && \
-            yarn install && \
-            apk add --no-cache g++ build-base python3 openssl-dev make cmake zlib-dev musl-dev && \
-            yarn build && \
-            mkdir -p /lbug/prebuilt && \
-            cp -f  /lbug/lbug-source/tools/nodejs_api/build/lbugjs.node /lbug/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node
+            apk add --no-cache bash g++ build-base python3 openssl-dev make cmake zlib-dev musl-dev file && \
+            cd /app && bash ./util/buildLbugjsNode.sh
           "
 
     - name: Configure npm authentication
       run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKENS }}" > ~/.npmrc
 
-    - name: Copy compiled file to repo directory
+    - name: Package for publish
       env:
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: |
-        yarn build
+      run: yarn build
 
     - name: Test in Docker for alpine (${{ matrix.arch }})
       id: docker_test

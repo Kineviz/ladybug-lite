@@ -11,6 +11,9 @@
   "scripts": {
     "build:ladybug": "bash ./util/buildLadybugWithDocker.sh",
     "build": "node util/build.js",
+    "build:native": "bash ./util/buildLbugjsNode.sh",
+    "build:extensions": "bash ./util/buildLadybugExtensions.sh",
+    "clone:source": "bash ./util/cloneLbugSource.sh",
     "install": "node util/install.js",
     "copy": "node util/copy.js",
     "test": "node util/test.js",

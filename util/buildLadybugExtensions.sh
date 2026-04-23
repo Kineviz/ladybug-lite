@@ -3,7 +3,10 @@
 # Script that only compiles Ladybug extensions, supports LBUG_DIR environment variable
 # apk add --no-cache openssl openssl-dev
 APP_ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}")/..; pwd)
-LBUG_SOURCE_DIR="$APP_ROOT_DIR/node_modules/@ladybugdb/core/lbug-source"
+# Upstream @ladybugdb/core@0.15.x no longer ships lbug-source/ in the tarball;
+# CI clones the source separately and passes LBUG_SOURCE_DIR. Fall back to the
+# old in-node_modules path for local dev against older cores.
+LBUG_SOURCE_DIR="${LBUG_SOURCE_DIR:-$APP_ROOT_DIR/node_modules/@ladybugdb/core/lbug-source}"
 EXTENSION_DIR="${LBUG_SOURCE_DIR}/extension"
 
 
@@ -70,10 +73,11 @@ else
     exit 1
 fi
 
-EXTENSION_DIST_DIR="${LBUG_SOURCE_DIR}/extension/alpine-${ARCH}"
-mkdir -p $EXTENSION_DIST_DIR
-find "${LBUG_SOURCE_DIR}/extension" -type f \( -path "*/build/*.lbug_extension" -o -path "*/build/*.kuzu_extension" \) -exec cp {} $EXTENSION_DIST_DIR \;
-
-# find "/app/node_modules/@ladybugdb/core/lbug-source/extension" -type f -path "*/build/*.lbug_extension" -exec cp {} /app/extensions/alpine-amd64 \;
+# Collect the built extensions into an output dir the publish pipeline can
+# pick up. Default to $APP_ROOT_DIR/extensions/alpine-$ARCH so the
+# buildExtension.yaml `git add extensions/*/*.lbug_extension` glob matches.
+EXTENSION_DIST_DIR="${EXTENSION_OUTPUT_DIR:-$APP_ROOT_DIR/extensions/alpine-$ARCH}"
+mkdir -p "$EXTENSION_DIST_DIR"
+find "${LBUG_SOURCE_DIR}/extension" -type f \( -path "*/build/*.lbug_extension" -o -path "*/build/*.kuzu_extension" \) -exec cp {} "$EXTENSION_DIST_DIR" \;
 
 echo "All extensions have been copied to the $EXTENSION_DIST_DIR directory"

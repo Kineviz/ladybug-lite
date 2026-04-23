@@ -99,6 +99,33 @@ const npmPublish = (package) => {
 };
 
 /**
+ * Copies any lbugjs-*.node binaries that CI wrote into
+ * node_modules/@ladybugdb/core/prebuilt/ up into ./prebuilt/ at the repo root.
+ * This covers freshly-built artifacts on every platform (darwin-x64 and the
+ * Alpine arm64 build would otherwise never make it to the committed prebuilt/
+ * directory, since copyPrebuiltBinaries below is gated to linux-x64/win32).
+ */
+const copyLocalPrebuiltBinaries = () => {
+  const localPrebuiltDir = path.join(srcDir, "prebuilt");
+  if (!fs.existsSync(localPrebuiltDir)) {
+    return;
+  }
+  const rootPrebuiltDir = path.join(rootDir, "prebuilt");
+  if (!fs.existsSync(rootPrebuiltDir)) {
+    fs.mkdirSync(rootPrebuiltDir, { recursive: true });
+  }
+  const entries = fs
+    .readdirSync(localPrebuiltDir)
+    .filter((f) => f.endsWith(".node"));
+  for (const file of entries) {
+    const src = path.join(localPrebuiltDir, file);
+    const dest = path.join(rootPrebuiltDir, file);
+    fs.copyFileSync(src, dest);
+    console.log(`Copied: ${src} -> ${dest}`);
+  }
+};
+
+/**
  * Fetches platform-specific prebuilt binaries from the scoped @ladybugdb/core-*
  * packages and copies each one's lbugjs.node into ./prebuilt/, remapping x64
  * filenames to amd64 so the runtime loader can find them.
@@ -234,6 +261,11 @@ if (fs.existsSync(srcDir)) {
 } else {
   console.error("Source directory not found:", srcDir);
 }
+
+// Promote any freshly-built .node files from
+// node_modules/@ladybugdb/core/prebuilt/ into the repo's ./prebuilt/ dir so
+// they get committed/published. Runs on every platform.
+copyLocalPrebuiltBinaries();
 
 // Fetch platform-specific prebuilt binaries only on linux-x64 so a single CI
 // runner produces them (matches the former `if: matrix.arch == 'amd64'` gate).

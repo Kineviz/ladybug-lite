@@ -30,21 +30,28 @@ jobs:
       with:
         node-version: '22'
 
-    - name: Install dependencies
+    - name: Install @ladybugdb/core
       run: |
         yarn cache clean
         yarn add @ladybugdb/core --force
-        echo "@ladybugdb/core version: $(yarn list @ladybugdb/core | grep @ladybugdb/core)"
+        echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
+
+    - name: Clone upstream ladybug source
+      run: yarn clone:source
 
     - name: Build Ladybug Extensions (${{ matrix.arch }})
+      # buildLadybugExtensions.sh defaults EXTENSION_OUTPUT_DIR to
+      # $APP_ROOT_DIR/extensions/alpine-$ARCH, which lands at
+      # /app/extensions/alpine-<arch>/ inside the container and matches the
+      # `git add extensions/*/*.lbug_extension` glob below.
       run: |
         docker run --rm \
         --platform linux/${{ matrix.arch }} \
         -v ${{ github.workspace }}:/app \
+        -e LBUG_SOURCE_DIR=/app/lbug-src \
         node:22-alpine /bin/sh -c "
           apk add --no-cache bash g++ build-base python3 openssl openssl-dev make cmake zlib-dev musl-dev && \
-          cd /app && \
-          bash ./util/buildLadybugExtensions.sh
+          cd /app && bash ./util/buildLadybugExtensions.sh
         "
 
     - name: Reset and force push changes
