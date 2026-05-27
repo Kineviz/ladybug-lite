@@ -100,12 +100,3 @@ jobs:
         done
         echo "git push failed after 5 attempts." >&2
         exit 1
-
-    - name: Tag with version
-      run: |
-        export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
-        git fetch --tags origin
-        git tag -d "$lbug_version" || true
-        git push origin ":refs/tags/$lbug_version" || true
-        git tag -a "$lbug_version" -m "Release $lbug_version"
-        git push origin "$lbug_version"

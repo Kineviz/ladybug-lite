@@ -28,14 +28,22 @@ if [ "${LBUG_FORCE_REBUILD:-0}" != "1" ] \
     && [ -f "$CORE_PKG_JSON" ]; then
     cached_ver=$(head -n 1 "$VERSION_FILE" | tr -d '[:space:]')
     target_ver=$(node -p "require('$CORE_PKG_JSON').version")
-    if [ "$cached_ver" = "$target_ver" ]; then
-        echo "Cache hit: $CACHED_BIN already built for v$target_ver, skipping compile."
+    # Probe the actual binary at $CACHED_BIN via dlopen + NodeDatabase.getVersion().
+    # getVersion.js absorbs every failure mode (file missing, musl/glibc
+    # mismatch, ABI mismatch, missing export, native crash caught by Node)
+    # and prints the sentinel "0.0.0", so this assignment never trips set -e
+    # — `|| bin_ver="0.0.0"` is belt-and-suspenders for the case where the
+    # node process is killed by an uncatchable signal (e.g. SIGSEGV from
+    # truly broken native code) before it can print the sentinel.
+    bin_ver=$(LBUG_BIN_PATH="$CACHED_BIN" node "$APP_ROOT_DIR/util/getVersion.js" 2>/dev/null) || bin_ver="0.0.0"
+    if [ "$cached_ver" = "$target_ver" ] && [ "$bin_ver" = "$target_ver" ]; then
+        echo "Cache hit: $CACHED_BIN already built for v$target_ver (binary self-reports $bin_ver), skipping compile."
         mkdir -p "$(dirname "$OUTPUT_PATH")"
         cp -f "$CACHED_BIN" "$OUTPUT_PATH"
         echo "Copied cached binary -> $OUTPUT_PATH"
         exit 0
     fi
-    echo "Cache miss (prebuilt/version=$cached_ver, target=$target_ver); rebuilding."
+    echo "Cache miss (prebuilt/version=$cached_ver, binary=$bin_ver, target=$target_ver); rebuilding."
 fi
 
 NODEJS_API_DIR="$LBUG_SOURCE_DIR/tools/nodejs_api"
