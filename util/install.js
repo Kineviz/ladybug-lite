@@ -66,7 +66,7 @@ const downloadWithCDN = (error) =>{
   .catch(() => {
     console.error(`Error downloading prebuilt binary: ${error.message}`);
     console.log("Prebuilt binary download failed. Please contact sean@kineviz.com .");
-    process.exit(1);
+    process.exit(0);
   });
 }
 
