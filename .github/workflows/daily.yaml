@@ -2,7 +2,7 @@ name: Daily Version Check
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 时间 0:00 运行
+    - cron: '0 0 * * *'  # Runs daily at 0:00 UTC
 
 jobs:
   check-versions:
@@ -10,19 +10,78 @@ jobs:
     steps:
       - name: Check versions
         id: check_versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LBUG_VERSION=$(npm view @ladybugdb/core version)
           LADYBUG_LITE_VERSION=$(npm view @kineviz/ladybug-lite version || echo "0.0.0")
+
+          # Fetch prebuilt/version directly from the remote via the Contents API
+          # instead of checking out the repo. The build workflows may push commits
+          # to this branch concurrently with this job, so a stale local checkout
+          # would not see them — curl always returns the latest committed value.
+          # On failure (network/404/auth) we fall back to 0.0.0 so the
+          # `build_failed` check below naturally evaluates to false and the
+          # workflow still proceeds with the lbug_newer comparison.
+          PREBUILT_URL="https://api.github.com/repos/${{ github.repository }}/contents/prebuilt/version?ref=${{ github.ref_name }}"
+          CURRENT_LBUG_VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.raw" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$PREBUILT_URL" | tr -d '[:space:]') || CURRENT_LBUG_VERSION=""
+          if [ -z "$CURRENT_LBUG_VERSION" ]; then
+            echo "::warning::Could not fetch prebuilt/version from $PREBUILT_URL; defaulting current_lbug_version to 0.0.0 and skipping build_failed detection"
+            CURRENT_LBUG_VERSION="0.0.0"
+          else
+            echo "Fetched current_lbug_version=$CURRENT_LBUG_VERSION from $PREBUILT_URL"
+          fi
+          
           echo "lbug_version=$LBUG_VERSION" >> $GITHUB_OUTPUT
           echo "ladybug_lite_version=$LADYBUG_LITE_VERSION" >> $GITHUB_OUTPUT
-
-          if [ "$(printf '%s\n' "$LBUG_VERSION" "$LADYBUG_LITE_VERSION" | sort -V | head -n1)" != "$LBUG_VERSION" ]; then
+          echo "current_lbug_version=$CURRENT_LBUG_VERSION" >> $GITHUB_OUTPUT
+  
+          if [ "$CURRENT_LBUG_VERSION" = "$LBUG_VERSION" ] && \
+             [ "$(printf '%s\n' "$CURRENT_LBUG_VERSION" "$LADYBUG_LITE_VERSION" | sort -V | head -n1)" = "$LADYBUG_LITE_VERSION" ] && \
+             [ "$CURRENT_LBUG_VERSION" != "$LADYBUG_LITE_VERSION" ]; then
+            echo "build_failed=true" >> $GITHUB_OUTPUT
+            echo "lbug_newer=false" >> $GITHUB_OUTPUT
+            echo "Build failure suspected: current=$CURRENT_LBUG_VERSION matches upstream but ladybug-lite=$LADYBUG_LITE_VERSION is behind"
+          elif [ "$(printf '%s\n' "$LBUG_VERSION" "$LADYBUG_LITE_VERSION" | sort -V | head -n1)" != "$LBUG_VERSION" ]; then
+            echo "build_failed=false" >> $GITHUB_OUTPUT
             echo "lbug_newer=true" >> $GITHUB_OUTPUT
             echo "Ladybug version ($LBUG_VERSION) is newer than ladybug-lite ($LADYBUG_LITE_VERSION)"
           else
+            echo "build_failed=false" >> $GITHUB_OUTPUT
             echo "lbug_newer=false" >> $GITHUB_OUTPUT
             echo "Ladybug version ($LBUG_VERSION) is not newer than ladybug-lite ($LADYBUG_LITE_VERSION)"
           fi
+        
+
+      - name: Notify build failure
+        if: steps.check_versions.outputs.build_failed == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const lbug_version = '${{ steps.check_versions.outputs.lbug_version }}';
+            const ladybug_lite_version = '${{ steps.check_versions.outputs.ladybug_lite_version }}';
+            const current_lbug_version = '${{ steps.check_versions.outputs.current_lbug_version }}';
+            const owner = context.repo.owner;
+
+            await github.rest.issues.create({
+              owner: owner,
+              repo: context.repo.repo,
+              title: `Build/publish failure: ladybug-lite ${ladybug_lite_version} is behind @ladybugdb/core ${lbug_version}`,
+              body: `@${owner}\n\n` +
+                    `A possible build/publish failure has been detected:\n\n` +
+                    `- @ladybugdb/core version currently compiled into this repo (prebuilt/version): **${current_lbug_version}**\n` +
+                    `- Latest @ladybugdb/core version on npm: **${lbug_version}**\n` +
+                    `- Latest @kineviz/ladybug-lite version on npm: **${ladybug_lite_version}**\n\n` +
+                    `Because \`current_lbug_version == lbug_version\` but \`current_lbug_version > ladybug_lite_version\`, ` +
+                    `the build workflow successfully committed prebuilt/version=${current_lbug_version}, ` +
+                    `but @kineviz/ladybug-lite was not published with a matching version. Please check the publish step.`,
+              labels: ['build-failure']
+            });
 
       - name: Send notification
         if: steps.check_versions.outputs.lbug_newer == 'true'
@@ -33,19 +92,107 @@ jobs:
             const lbug_version = '${{ steps.check_versions.outputs.lbug_version }}';
             const ladybug_lite_version = '${{ steps.check_versions.outputs.ladybug_lite_version }}';
 
-            // 创建 issue 通知
+            // Create issue notification
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `@ladybugdb/core 更新通知: 新版本 ${lbug_version} 可用`,
-              body: `检测到 @ladybugdb/core (${lbug_version}) 比当前的 ladybug-lite (${ladybug_lite_version}) 版本更新。\n\n请考虑更新 ladybug-lite。`,
+              title: `@ladybugdb/core update available: new version ${lbug_version}`,
+              body: `@${context.repo.owner} Detected that @ladybugdb/core (${lbug_version}) is newer than the current ladybug-lite (${ladybug_lite_version}).\n\nPlease consider updating ladybug-lite.`,
               labels: ['version-update']
             });
 
-            // 主动触发 build.yaml workflow
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build.yaml',
-              ref: context.ref
-            });
+      - name: Trigger build workflows and wait for completion
+        if: steps.check_versions.outputs.lbug_newer == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const workflows = ['build.yaml', 'buildExtension.yaml', 'buildMacOsIntel.yaml'];
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            // Subtract 30s to absorb clock skew between this runner and the GitHub API
+            // when matching freshly-created runs by created_at timestamp.
+            const dispatchedAfter = new Date(Date.now() - 30 * 1000);
+
+            for (const wf of workflows) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: wf,
+                ref: context.ref
+              });
+              console.log(`Dispatched ${wf}`);
+            }
+
+            // Locate the run each dispatch produced (runs may take a few seconds to appear).
+            const runIds = {};
+            for (const wf of workflows) {
+              let runId = null;
+              for (let attempt = 0; attempt < 30 && !runId; attempt++) {
+                await sleep(10 * 1000);
+                const { data } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: wf,
+                  event: 'workflow_dispatch',
+                  per_page: 10
+                });
+                const candidate = data.workflow_runs.find(r => new Date(r.created_at) >= dispatchedAfter);
+                if (candidate) runId = candidate.id;
+              }
+              if (!runId) throw new Error(`Could not locate dispatched run for ${wf}`);
+              runIds[wf] = runId;
+              console.log(`${wf} -> run ${runId}`);
+            }
+
+            // Poll each run until all complete; fail if any conclusion isn't 'success'.
+            const pending = new Set(workflows);
+            const failures = [];
+            const maxMinutes = 90;
+            const deadline = Date.now() + maxMinutes * 60 * 1000;
+            while (pending.size > 0) {
+              if (Date.now() > deadline) {
+                throw new Error(`Timed out after ${maxMinutes} minutes waiting for: ${Array.from(pending).join(', ')}`);
+              }
+              await sleep(30 * 1000);
+              for (const wf of Array.from(pending)) {
+                const { data: run } = await github.rest.actions.getWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: runIds[wf]
+                });
+                console.log(`${wf} run ${runIds[wf]}: status=${run.status} conclusion=${run.conclusion}`);
+                if (run.status === 'completed') {
+                  pending.delete(wf);
+                  if (run.conclusion !== 'success') {
+                    failures.push(`${wf} (${run.conclusion})`);
+                  }
+                }
+              }
+            }
+
+            if (failures.length > 0) {
+              throw new Error(`Build workflows did not succeed: ${failures.join(', ')}`);
+            }
+            console.log('All build workflows completed successfully');
+
+      - name: Checkout repository for tagging
+        if: steps.check_versions.outputs.lbug_newer == 'true'
+        uses: actions/checkout@v4
+        with:
+          # The sibling build workflows push commits to this branch during the
+          # wait step above; fetch the latest so the tag points at the up-to-date
+          # commit (with prebuilt/version updated), not the commit that existed
+          # when this job started.
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Tag with version
+        if: steps.check_versions.outputs.lbug_newer == 'true'
+        env:
+          LBUG_VERSION: ${{ steps.check_versions.outputs.lbug_version }}
+        run: |
+          git fetch --tags origin
+          git tag -d "$LBUG_VERSION" || true
+          git push origin ":refs/tags/$LBUG_VERSION" || true
+          git tag -a "$LBUG_VERSION" -m "Release $LBUG_VERSION"
+          git push origin "$LBUG_VERSION"
