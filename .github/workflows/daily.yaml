@@ -107,7 +107,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const workflows = ['build.yaml', 'buildExtension.yaml', 'buildMacOsIntel.yaml'];
+            const workflows = ['build.yaml', 'buildExtension.yaml'];
             const sleep = (ms) => new Promise(r => setTimeout(r, ms));
             // Subtract 30s to absorb clock skew between this runner and the GitHub API
             // when matching freshly-created runs by created_at timestamp.

@@ -12,10 +12,10 @@ name: Build Ladybug Lite for macOS Intel
 #     after Aug 2027), so this workflow has a finite lifetime.
 
 on:
-  push:
-    branches: [ release ]
-  pull_request:
-    branches: [ release ]
+  # push:
+  #   branches: [ release ]
+  # pull_request:
+  #   branches: [ release ]
   workflow_dispatch:
 
 jobs:
