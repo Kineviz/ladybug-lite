@@ -1,10 +1,10 @@
 name: Build Ladybug Extensions
 
 on:
-  push:
-    branches: [ release ]
-  pull_request:
-    branches: [ release ]
+  # push:
+  #   branches: [ release ]
+  # pull_request:
+  #   branches: [ release ]
   workflow_dispatch:
 
 jobs:
@@ -48,6 +48,12 @@ jobs:
       # host runner can't git-reset/git-add those files (round-2 failure was
       # exactly "fatal: cannot create directory at 'extensions/alpine-arm64':
       # Permission denied").
+      #
+      # Exit-code handling: see build.yaml's matching step. The earlier
+      # `apk && cd && build && chown ... || true` chain masked build
+      # failures because POSIX parses it as `(... && chown) || true` —
+      # any failure became 0. set -e + EXIT trap separates cleanup from
+      # error propagation so this step actually fails when the build fails.
       run: |
         HOST_UID=$(id -u)
         HOST_GID=$(id -g)
@@ -58,9 +64,11 @@ jobs:
         -e HOST_UID="$HOST_UID" \
         -e HOST_GID="$HOST_GID" \
         node:22-alpine /bin/sh -c "
-          apk add --no-cache bash g++ build-base python3 openssl openssl-dev make cmake zlib-dev musl-dev && \
-          cd /app && bash ./util/buildLadybugExtensions.sh && \
-          chown -R \$HOST_UID:\$HOST_GID /app/extensions /app/lbug-src 2>/dev/null || true
+          set -e
+          trap 'rc=\$?; chown -R \$HOST_UID:\$HOST_GID /app/extensions /app/lbug-src 2>/dev/null || true; exit \$rc' EXIT
+          apk add --no-cache bash g++ build-base python3 openssl openssl-dev make cmake zlib-dev musl-dev
+          cd /app
+          bash ./util/buildLadybugExtensions.sh
         "
 
     - name: Merge and push changes

@@ -140,9 +140,9 @@ const copyPrebuiltBinaries = () => {
 
   const platformPackages = [
     "core-darwin-arm64",
+    "core-darwin-x64",
     "core-linux-arm64",
     "core-linux-x64",
-    "core-win32-x64",
   ];
 
   const installArgs = platformPackages
@@ -166,6 +166,9 @@ const copyPrebuiltBinaries = () => {
     const srcBin = path.join(rootDir, "node_modules", "@ladybugdb", pkg, "lbugjs.node");
     const destBin = path.join(prebuiltDir, `lbugjs-${suffix}.node`);
     if (fs.existsSync(srcBin)) {
+      if (fs.existsSync(destBin)) {
+        fs.unlinkSync(destBin); // Remove existing file if it exists
+      }
       fs.copyFileSync(srcBin, destBin);
       console.log(`Copied: ${srcBin} -> ${destBin}`);
     } else {

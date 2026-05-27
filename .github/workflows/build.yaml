@@ -97,6 +97,14 @@ jobs:
       # mounted workspace, leaving files the runner user can't touch. Later
       # steps (`git reset`, `yarn build`'s deleteFiles) then fail with
       # EACCES / "Permission denied" — this was the round-1/round-2 failure.
+      #
+      # Exit-code handling: an earlier `apk && cd && build && chown ... || true`
+      # chain swallowed the build's non-zero exit because POSIX parses it as
+      # `(apk && cd && build && chown) || true` — any failure in the chain
+      # was masked, so a failing compile showed up as a green CI step. Now
+      # `set -e` aborts on any failure, and an EXIT trap runs chown
+      # unconditionally while preserving the original $? so the docker exit
+      # code (and therefore this step) reflects the build outcome.
       run: |
         HOST_UID=$(id -u)
         HOST_GID=$(id -g)
@@ -108,9 +116,11 @@ jobs:
           -e HOST_UID="$HOST_UID" \
           -e HOST_GID="$HOST_GID" \
           node:22-alpine /bin/sh -c "
-            apk add --no-cache bash g++ build-base python3 openssl-dev make cmake zlib-dev musl-dev file && \
-            cd /app && bash ./util/buildLbugjsNode.sh && \
-            chown -R \$HOST_UID:\$HOST_GID /app/node_modules /app/lbug-src /app/prebuilt 2>/dev/null || true
+            set -e
+            trap 'rc=\$?; chown -R \$HOST_UID:\$HOST_GID /app/node_modules /app/lbug-src /app/prebuilt 2>/dev/null || true; exit \$rc' EXIT
+            apk add --no-cache bash g++ build-base python3 openssl-dev make cmake zlib-dev musl-dev file
+            cd /app
+            bash ./util/buildLbugjsNode.sh
           "
 
     - name: Configure npm authentication
