@@ -57,7 +57,7 @@ const download = (url, dest) => {
 const downloadWithCDN = (error) =>{
   const CDNBaseURL=`https://graphxr.oss-cn-shanghai.aliyuncs.com/ladybug@${packageVersion}`
   const newPrebuiltURL = prebuiltURL.replace(baseURL,CDNBaseURL);
-  download(newPrebuiltURL, targetPath)
+  return download(newPrebuiltURL, targetPath)
   .then(() => {
     console.log(`Successfully downloaded to ${targetPath}`);
     console.log("Done!");
@@ -66,6 +66,7 @@ const downloadWithCDN = (error) =>{
   .catch(() => {
     console.error(`Error downloading prebuilt binary: ${error.message}`);
     console.log("Prebuilt binary download failed. Please contact sean@kineviz.com .");
+    process.exit(1);
   });
 }
 
@@ -75,7 +76,8 @@ download(prebuiltURL, targetPath)
     console.log("Done!");
     process.exit(0);
   })
-  .catch((err) => {
+  .catch(async (err) => {
     console.log("Try download with CND");
     downloadWithCDN(err)
-  });
+  }) 
+    

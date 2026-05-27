@@ -62,9 +62,42 @@ if [ ! -f "$NODEJS_API_DIR/package.json" ]; then
     exit 1
 fi
 
+# yarn install in nodejs_api/ installs cmake-js + other build deps — needed
+# on every platform (whether the actual cmake invocation comes from the
+# standalone build.js below or `make nodejs` from the upstream root).
 cd "$NODEJS_API_DIR"
 yarn install
-yarn build
+
+# Build path diverges by platform.
+#
+# Linux/Alpine path (`yarn build` in nodejs_api/):
+#   This runs upstream's tools/nodejs_api/build.js, which does
+#   `cmake -S . -B build -DLBUG_SOURCE_DIR=...` standalone. CI confirms this
+#   works on Linux for @ladybugdb/core 0.16.x.
+#
+# macOS path (`make nodejs` from $LBUG_SOURCE_DIR):
+#   The standalone build.js path fails on 0.16.x macOS with
+#     CMake Error at CMakeLists.txt:119:
+#       The Node.js addon requires the lbug target or
+#       LBUG_NODEJS_USE_PRECOMPILED_LIB=TRUE.
+#   The `lbug` cmake target only exists when cmake is configured from the
+#   upstream root. The upstream Makefile's `nodejs` target (the same one
+#   @ladybugdb/core's own install.js drives — see
+#   node_modules/@ladybugdb/core/install.js:144) builds `lbug` + the addon
+#   in one cmake tree, and the output still lands at the same
+#   tools/nodejs_api/build/lbugjs.node so the rest of this script is
+#   unchanged. We don't touch the Linux path because CI shows it works
+#   today and changing both at once would mix the diagnosis.
+case "$(uname -s)" in
+    Darwin*)
+        NUM_THREADS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+        echo "macOS detected — building via 'make nodejs' from $LBUG_SOURCE_DIR (NUM_THREADS=$NUM_THREADS)"
+        (cd "$LBUG_SOURCE_DIR" && make nodejs NUM_THREADS="$NUM_THREADS")
+        ;;
+    *)
+        yarn build
+        ;;
+esac
 
 BUILT_NODE="$NODEJS_API_DIR/build/lbugjs.node"
 if [ ! -f "$BUILT_NODE" ]; then

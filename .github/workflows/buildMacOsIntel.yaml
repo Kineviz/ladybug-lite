@@ -52,12 +52,54 @@ jobs:
         yarn add @ladybugdb/core --force --ignore-scripts
         echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
 
+    - name: Check prebuilt binary cache
+      # Mirrors util/buildLbugjsNode.sh's cache check, but at the workflow
+      # level so we can also skip `yarn clone:source` (a multi-minute git
+      # clone of the upstream ladybug repo) when the cache hits, not just
+      # the compile. Outputs cache_hit=true|false consumed by the two heavy
+      # steps below.
+      #
+      # Failure modes are absorbed by util/getVersion.js (prints "0.0.0"
+      # sentinel) and the `|| bin_ver="0.0.0"` belt-and-suspenders, so this
+      # step never aborts the job — at worst it falls through to cache_hit
+      # =false and we rebuild from source.
+      id: cache
+      env:
+        OUTPUT_PATH: ${{ github.workspace }}/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-amd64.node
+      run: |
+        CACHED_BIN="${{ github.workspace }}/prebuilt/lbugjs-darwin-amd64.node"
+        VERSION_FILE="${{ github.workspace }}/prebuilt/version"
+        CORE_PKG_JSON="${{ github.workspace }}/node_modules/@ladybugdb/core/package.json"
+
+        if [ "${LBUG_FORCE_REBUILD:-0}" != "1" ] \
+            && [ -f "$CACHED_BIN" ] \
+            && [ -f "$VERSION_FILE" ] \
+            && [ -f "$CORE_PKG_JSON" ]; then
+          cached_ver=$(head -n 1 "$VERSION_FILE" | tr -d '[:space:]')
+          target_ver=$(node -p "require('$CORE_PKG_JSON').version")
+          bin_ver=$(LBUG_BIN_PATH="$CACHED_BIN" node "${{ github.workspace }}/util/getVersion.js" 2>/dev/null) || bin_ver="0.0.0"
+
+          if [ "$cached_ver" = "$target_ver" ] && [ "$bin_ver" = "$target_ver" ]; then
+            echo "Cache hit: $CACHED_BIN for v$target_ver (binary self-reports $bin_ver), skipping clone+compile"
+            mkdir -p "$(dirname "$OUTPUT_PATH")"
+            cp -f "$CACHED_BIN" "$OUTPUT_PATH"
+            echo "cache_hit=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Cache miss (prebuilt/version=$cached_ver, binary=$bin_ver, target=$target_ver); will clone + rebuild."
+        else
+          echo "Cache check skipped (missing files or LBUG_FORCE_REBUILD=1); will clone + rebuild."
+        fi
+        echo "cache_hit=false" >> "$GITHUB_OUTPUT"
+
     - name: Clone upstream ladybug source
+      if: steps.cache.outputs.cache_hit != 'true'
       env:
         LBUG_SUBMODULES: tools/nodejs_api
       run: yarn clone:source
 
     - name: Build lbugjs.node from source (darwin-amd64)
+      if: steps.cache.outputs.cache_hit != 'true'
       env:
         LBUG_SOURCE_DIR: ${{ github.workspace }}/lbug-src
         OUTPUT_PATH: ${{ github.workspace }}/node_modules/@ladybugdb/core/prebuilt/lbugjs-darwin-amd64.node

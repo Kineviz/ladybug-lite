@@ -63,25 +63,30 @@ jobs:
           chown -R \$HOST_UID:\$HOST_GID /app/extensions /app/lbug-src 2>/dev/null || true
         "
 
-    - name: Reset and force push changes
+    - name: Merge and push changes
+      # Mirrors build.yaml / buildMacOsIntel.yaml: each retry re-fetches and
+      # merges remote with -X ours before pushing, so sibling matrix jobs
+      # (arm64 vs amd64) can interleave pushes without losing each other's
+      # extensions. The previous force-push approach overwrote whichever
+      # sibling pushed first.
       # `git add extensions/` (directory form) is more reliable than the old
       # extensions/*/*.ext glob, which depends on shell expansion finding
-      # matches on disk BEFORE git sees the pathspec. `extensions/version`
-      # is the cache key read by util/buildLadybugExtensions.sh; written
-      # AFTER the reset so it lands on the freshly-reset tree, not the stale
-      # one from a previous run.
+      # matches on disk BEFORE git sees the pathspec. `extensions/version` is
+      # the cache key read by util/buildLadybugExtensions.sh — same value
+      # across arches per @ladybugdb/core release, so -X ours conflict
+      # resolution is a no-op for it.
       run: |
         export lbug_version=$(node -p "require('./node_modules/@ladybugdb/core/package.json').version")
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
-        git fetch origin ${{ github.ref }}
-        git reset --hard origin/${{ github.ref_name }}
         mkdir -p extensions
         echo "$lbug_version" > extensions/version
         git add extensions/ 2>/dev/null || true
         git commit -m "Add compiled lbug extension for @ladybugdb/core v$lbug_version [skip ci]" || echo "Nothing to commit"
         for attempt in 1 2 3 4 5; do
-          if git push --force; then
+          git fetch origin ${{ github.ref }} || true
+          git merge -X ours origin/${{ github.ref_name }} --no-edit || true
+          if git push; then
             echo "Pushed on attempt $attempt."
             exit 0
           fi

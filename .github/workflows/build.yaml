@@ -35,12 +35,62 @@ jobs:
         yarn add @ladybugdb/core --force
         echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
 
+    - name: Check prebuilt binary cache
+      # Same intent as buildMacOsIntel.yaml's workflow-level cache check:
+      # if prebuilt/lbugjs-alpine-<arch>.node already matches the target
+      # @ladybugdb/core version, skip the multi-minute clone:source AND the
+      # 15-20 min docker compile.
+      #
+      # Why bin_ver is probed inside a node:22-alpine container instead of
+      # directly on the host: the host runner is glibc (ubuntu-latest /
+      # ubuntu-24.04-arm) and the .node we want to validate is musl-linked.
+      # Directly invoking `node util/getVersion.js` on the host would fail
+      # at dlopen with a libc-mismatch error → getVersion.js returns its
+      # "0.0.0" sentinel → false cache miss. Running it inside the same
+      # alpine image the build step uses gives the loader a matching libc.
+      # The image is already on the runner (the docker build step below uses
+      # it), so the probe adds only a few seconds.
+      id: cache
+      env:
+        OUTPUT_PATH: ${{ github.workspace }}/node_modules/@ladybugdb/core/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node
+      run: |
+        CACHED_BIN="${{ github.workspace }}/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node"
+        VERSION_FILE="${{ github.workspace }}/prebuilt/version"
+        CORE_PKG_JSON="${{ github.workspace }}/node_modules/@ladybugdb/core/package.json"
+
+        if [ "${LBUG_FORCE_REBUILD:-0}" != "1" ] \
+            && [ -f "$CACHED_BIN" ] \
+            && [ -f "$VERSION_FILE" ] \
+            && [ -f "$CORE_PKG_JSON" ]; then
+          cached_ver=$(head -n 1 "$VERSION_FILE" | tr -d '[:space:]')
+          target_ver=$(node -p "require('$CORE_PKG_JSON').version")
+          bin_ver=$(docker run --rm \
+              --platform linux/${{ matrix.arch }} \
+              -v ${{ github.workspace }}:/app \
+              -e LBUG_BIN_PATH=/app/prebuilt/lbugjs-alpine-${{ matrix.arch }}.node \
+              node:22-alpine node /app/util/getVersion.js 2>/dev/null) || bin_ver="0.0.0"
+
+          if [ "$cached_ver" = "$target_ver" ] && [ "$bin_ver" = "$target_ver" ]; then
+            echo "Cache hit: $CACHED_BIN for v$target_ver (binary self-reports $bin_ver), skipping clone+compile"
+            mkdir -p "$(dirname "$OUTPUT_PATH")"
+            cp -f "$CACHED_BIN" "$OUTPUT_PATH"
+            echo "cache_hit=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Cache miss (prebuilt/version=$cached_ver, binary=$bin_ver, target=$target_ver); will clone + rebuild."
+        else
+          echo "Cache check skipped (missing files or LBUG_FORCE_REBUILD=1); will clone + rebuild."
+        fi
+        echo "cache_hit=false" >> "$GITHUB_OUTPUT"
+
     - name: Clone upstream ladybug source
+      if: steps.cache.outputs.cache_hit != 'true'
       env:
         LBUG_SUBMODULES: tools/nodejs_api
       run: yarn clone:source
 
     - name: Build lbugjs.node in Docker (${{ matrix.arch }})
+      if: steps.cache.outputs.cache_hit != 'true'
       # Delegates to util/buildLbugjsNode.sh inside an Alpine container so
       # build.yaml, buildMacOsIntel.yaml and local dev share one build recipe.
       # chown at the end: the container runs as root and writes into the
