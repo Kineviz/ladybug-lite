@@ -22,7 +22,7 @@
   "author": "Ladybug Team",
   "license": "MIT",
   "devDependencies": {
-    "@ladybugdb/core": "0.17.0"
+    "@ladybugdb/core": "^0.17.0"
   },
   "dependencies": {
     "https-proxy-agent": "^7.0.6"
