@@ -1,6 +1,6 @@
 {
   "name": "@kineviz/ladybug-lite",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "description": "A lightweight fork of the Ladybug (formerly Kùzu) embedded graph database, optimized for faster installation and broader compatibility.",
   "main": "index.js",
   "homepage": "https://ladybugdb.com/",
@@ -22,7 +22,7 @@
   "author": "Ladybug Team",
   "license": "MIT",
   "devDependencies": {
-    "@ladybugdb/core": "^0.16.1"
+    "@ladybugdb/core": "0.17.0"
   },
   "dependencies": {
     "https-proxy-agent": "^7.0.6"
