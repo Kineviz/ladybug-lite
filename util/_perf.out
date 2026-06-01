@@ -1,0 +1,21 @@
+=== Ladybug 导入性能测试 ===
+数据目录 : E:\projects\ladybug-lite\util\export_parquet
+数据库   : E:\projects\ladybug-lite\util\perf_import_db (已清空)
+Lbug 版本: 0.16.1
+
+Schema (7 条 DDL): 53.4 ms
+
+  COPY OrderNode    [NODE]     655.0 ms     1,945,000 行  2,969,308 rows/s
+  COPY Store        [NODE]      87.6 ms            25 行  285 rows/s
+  COPY Product      [NODE]      81.6 ms           206 行  2,525 rows/s
+  COPY Customer     [NODE]     590.3 ms        92,000 行  155,852 rows/s
+  COPY Includes     [REL]   505406.8 ms     4,291,450 行  8,491 rows/s
+  COPY AtStore      [REL]      354.3 ms       758,359 行  2,140,220 rows/s
+  COPY Placed       [REL]      688.3 ms     1,304,100 行  1,894,719 rows/s
+
+=== 汇总 ===
+COPY 总耗时 : 508015.9 ms
+总行数      : 8,391,140
+平均吞吐    : 16,517 rows/s
+parquet 大小: 55.6 MB  (0.1 MB/s)
+端到端      : 508069.4 ms (含建表)

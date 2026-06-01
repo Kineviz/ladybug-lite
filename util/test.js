@@ -8,6 +8,7 @@ const lbug = require("./../");
   if (fs.existsSync(dbPath)) {
     // Delete the existing database
     fs.rmSync(dbPath, { recursive: true, force: true });
+    fs.rmSync(dbPath + ".wal", { recursive: true, force: true });
   }
   const db = new lbug.Database(dbPath);
   console.log("Ladybug Version is", lbug.VERSION);

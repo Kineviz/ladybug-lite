@@ -1,4 +1,3 @@
-
 /**
  * A nullable type that can be either T or null.
  */
@@ -21,6 +20,22 @@ export type ProgressCallback = (
     numPipelinesFinished: number,
     numPipelines: number
 ) => void;
+
+/**
+ * Low-level pointer to an Arrow C Data Interface struct.
+ * Native producers can pass N-API External values; JavaScript callers that have
+ * raw addresses can pass them as bigint.
+ */
+export type NativePointer = bigint | object;
+
+/**
+ * Zero-copy CSR arrays returned by an Arrow query result.
+ */
+export interface CSRResult {
+    indptr: BigUint64Array;
+    indices: BigUint64Array;
+    edgeIds: BigUint64Array | null;
+}
 
 /**
  * Represents a node ID in the graph database.
@@ -84,6 +99,7 @@ export type LbugValue =
     | RelValue
     | RecursiveRelValue
     | LbugValue[]
+    | Map<LbugValue, LbugValue>
     | { [key: string]: LbugValue };
 
 /**
@@ -102,7 +118,14 @@ export interface SystemConfig {
     autoCheckpoint?: boolean;
     /** Threshold for automatic checkpoints */
     checkpointThreshold?: number;
+    /** Whether node tables create the default primary-key hash index */
+    enableDefaultHashIndex?: boolean;
 }
+
+/**
+ * Wrap a string or JavaScript value as a JSON-typed query parameter.
+ */
+export function json(value: string | LbugValue): LbugValue;
 
 /**
  * Represents a Lbug database instance.
@@ -117,6 +140,9 @@ export class Database {
      * @param maxDBSize Maximum size of the database in bytes
      * @param autoCheckpoint Whether to enable automatic checkpoints
      * @param checkpointThreshold Threshold for automatic checkpoints
+     * @param throwOnWalReplayFailure Whether WAL replay failures should throw
+     * @param enableChecksums Whether checksum validation is enabled
+     * @param enableDefaultHashIndex Whether node tables create the default primary-key hash index
      */
     constructor(
         databasePath?: string,
@@ -125,7 +151,10 @@ export class Database {
         readOnly?: boolean,
         maxDBSize?: number,
         autoCheckpoint?: boolean,
-        checkpointThreshold?: number
+        checkpointThreshold?: number,
+        throwOnWalReplayFailure?: boolean,
+        enableChecksums?: boolean,
+        enableDefaultHashIndex?: boolean
     );
 
     /**
@@ -266,6 +295,56 @@ export class Connection {
      * @returns The query result(s)
      */
     querySync(statement: string): QueryResult | QueryResult[];
+
+    /**
+     * Execute a query with the native Arrow result collector.
+     * @param statement The statement to execute
+     * @param chunkSize Native Arrow chunk size
+     * @returns Promise that resolves to the Arrow query result
+     */
+    queryArrow(statement: string, chunkSize?: number): Promise<ArrowQueryResult>;
+
+    /**
+     * Execute a query synchronously with the native Arrow result collector.
+     * @param statement The statement to execute
+     * @param chunkSize Native Arrow chunk size
+     * @returns The Arrow query result
+     */
+    queryArrowSync(statement: string, chunkSize?: number): ArrowQueryResult;
+
+    /**
+     * Create an Arrow memory-backed node table from Arrow C Data Interface pointers.
+     * Ownership of schemaPtr and arraysPtr is transferred to Ladybug.
+     */
+    createArrowTableSync(
+        tableName: string,
+        schemaPtr: NativePointer,
+        arraysPtr: NativePointer | NativePointer[],
+        numArrays?: number
+    ): QueryResult;
+
+    /**
+     * Create an Arrow memory-backed relationship table from Arrow C Data Interface pointers.
+     * For flat layout (default): the Arrow table must contain endpoint columns named "from" and "to".
+     * For CSR layout: pass indptrSchemaPtr and indptrArraysPtr; dstColName names the destination column.
+     * Ownership of schemaPtr and arraysPtr is transferred to Ladybug.
+     */
+    createArrowRelTableSync(
+        tableName: string,
+        srcTableName: string,
+        dstTableName: string,
+        schemaPtr: NativePointer,
+        arraysPtr: NativePointer | NativePointer[],
+        numArrays?: number,
+        indptrSchemaPtr?: NativePointer | null,
+        indptrArraysPtr?: NativePointer | NativePointer[] | null,
+        numIndptrArrays?: number,
+        dstColName?: string): QueryResult;
+
+    /**
+     * Drop an Arrow memory-backed table and unregister its Arrow data.
+     */
+    dropArrowTableSync(tableName: string): QueryResult;
 }
 
 /**
@@ -278,6 +357,12 @@ export class PreparedStatement {
      * @returns True if preparation was successful
      */
     isSuccess(): boolean;
+
+    /**
+     * Check if the statement only performs read operations.
+     * @returns True if the prepared statement is read-only
+     */
+    isReadOnly(): boolean;
 
     /**
      * Get the error message if preparation failed.
@@ -385,6 +470,16 @@ export class QueryResult {
 }
 
 /**
+ * Represents an Arrow-native query result.
+ */
+export class ArrowQueryResult extends QueryResult {
+    /**
+     * Get zero-copy native CSR arrays.
+     */
+    csr(): CSRResult;
+}
+
+/**
  * Default export for the Lbug module.
  */
 declare const lbug: {
@@ -392,6 +487,8 @@ declare const lbug: {
     Connection: typeof Connection;
     PreparedStatement: typeof PreparedStatement;
     QueryResult: typeof QueryResult;
+    ArrowQueryResult: typeof ArrowQueryResult;
+    json: typeof json;
     VERSION: string;
     STORAGE_VERSION: bigint;
 };
