@@ -145,6 +145,18 @@ const copyPrebuiltBinaries = () => {
     "core-win32-x64",
   ];
 
+  // When the Windows Electron-compatible binary has been built locally (see
+  // .github/workflows/buildWindows.yaml + util/electron/), do NOT re-fetch the
+  // upstream win32 prebuilt — it lacks the delay-load hook and would clobber
+  // the patched binary that loads under Electron.
+  if (process.env.LBUG_SKIP_WIN32_PREBUILT === "1") {
+    const idx = platformPackages.indexOf("core-win32-x64");
+    if (idx !== -1) {
+      platformPackages.splice(idx, 1);
+      console.log("LBUG_SKIP_WIN32_PREBUILT=1: keeping locally-built win32 binary, skipping upstream core-win32-x64 fetch.");
+    }
+  }
+
   const installArgs = platformPackages
     .map((pkg) => `@ladybugdb/${pkg}@${lbugVersion}`)
     .join(" ");

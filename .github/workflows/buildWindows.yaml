@@ -1,0 +1,108 @@
+name: Build Ladybug Lite for Windows (Electron-compatible)
+
+# Builds an Electron-compatible win32-amd64 lbugjs.node from source.
+#
+# Why this workflow exists
+#   The win32-amd64 binary that ships today is pulled from upstream
+#   @ladybugdb/core-win32-x64 (see util/build.js copyPrebuiltBinaries). That
+#   binary is an N-API addon, but on Windows it imports its napi_* symbols
+#   directly from "node.exe" with NO delay-load hook. Under Electron the host
+#   is electron.exe, so the loader cannot bind the imports and the process
+#   crashes in process.dlopen. (Linux/alpine/darwin binaries do NOT have this
+#   problem — they resolve napi from the host at runtime.)
+#
+#   util/electron/patchWinDelayLoad.js adds /DELAYLOAD:node.exe + the delay-load
+#   hook to the cmake-js build, reproducing node-gyp's behaviour. The resulting
+#   single binary loads under BOTH Node 22 and Electron 39 (both N-API v10).
+#
+# This job builds, then gates on a plain-Node test AND an Electron smoke test,
+# and uploads the binary as an artifact. It deliberately does NOT auto-publish
+# to npm or push to the branch — promote the artifact manually once validated.
+
+on:
+  workflow_dispatch:
+    inputs:
+      electron_version:
+        description: "Electron major to smoke-test against"
+        required: false
+        default: "39"
+
+jobs:
+  build:
+    name: Build on win32-amd64 (Electron-compatible)
+    runs-on: windows-2022
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          cmake --version || echo "cmake missing"
+          node -v && yarn --version
+
+      - name: Install @ladybugdb/core
+        shell: bash
+        run: |
+          yarn cache clean
+          yarn add @ladybugdb/core --force --ignore-scripts
+          echo "@ladybugdb/core version: $(node -p "require('./node_modules/@ladybugdb/core/package.json').version")"
+
+      - name: Clone upstream ladybug source
+        shell: bash
+        env:
+          LBUG_SUBMODULES: tools/nodejs_api
+        run: yarn clone:source
+
+      - name: Apply Windows delay-load (Electron) patch
+        shell: bash
+        run: node util/electron/patchWinDelayLoad.js lbug-src/tools/nodejs_api
+
+      - name: Build lbugjs.node from source (win32-amd64)
+        shell: bash
+        env:
+          LBUG_SOURCE_DIR: ${{ github.workspace }}/lbug-src
+          # Write straight into the repo's prebuilt/ dir. We deliberately skip
+          # `yarn build` (packaging) — it runs a destructive deleteFiles on the
+          # repo root and can attempt an npm publish; the JS wrappers needed by
+          # the tests are already committed.
+          OUTPUT_PATH: ${{ github.workspace }}/prebuilt/lbugjs-win32-amd64.node
+          # Bypass the cached (non-hooked) prebuilt binary committed to the repo
+          # — we explicitly want a fresh, patched build.
+          LBUG_FORCE_REBUILD: "1"
+        run: yarn build:native
+
+      - name: Stage built binary as lbugjs.node
+        shell: bash
+        run: |
+          cp -f prebuilt/lbugjs-win32-amd64.node lbugjs.node
+          node -e "console.log('built win32 binary size =', require('fs').statSync('lbugjs.node').size)"
+
+      - name: Test under plain Node 22
+        shell: bash
+        run: node util/test.js
+
+      - name: Smoke-test under Electron ${{ github.event.inputs.electron_version }}
+        shell: bash
+        env:
+          ELECTRON_VER: ${{ github.event.inputs.electron_version }}
+        run: |
+          unset ELECTRON_RUN_AS_NODE
+          mkdir -p .electron-test && cd .electron-test
+          echo '{"name":"e","version":"1.0.0","private":true}' > package.json
+          npm install "electron@^${ELECTRON_VER:-39}" --no-audit --no-fund
+          node -p "'Electron ' + require('electron/package.json').version"
+          # Run the repo's Electron main-process smoke test against the staged binary.
+          LBUG_PKG_ROOT="${{ github.workspace }}" ./node_modules/.bin/electron ../util/electron/electronSmokeTest.js
+
+      - name: Upload Electron-compatible binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: lbugjs-win32-amd64-electron
+          path: prebuilt/lbugjs-win32-amd64.node
+          if-no-files-found: error

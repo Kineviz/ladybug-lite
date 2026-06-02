@@ -17,6 +17,7 @@
     "install": "node util/install.js",
     "copy": "node util/copy.js",
     "test": "node util/test.js",
+    "test:electron": "npx electron@39.8.10 util/electron/electronSmokeTest.js",
     "release": "npm publish --access public --registry https://registry.npmjs.org"
   },
   "author": "Ladybug Team",
