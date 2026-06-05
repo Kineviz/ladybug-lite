@@ -1,11 +1,12 @@
 name: Build Ladybug Lite for Windows (Electron-compatible)
 
-# Builds an Electron-compatible win32-amd64 lbugjs.node from source.
+# Builds an Electron-compatible lbugjs.node from source for Windows, for both
+# amd64 (x64) and arm64.
 #
 # Why this workflow exists
-#   The win32-amd64 binary that ships today is pulled from upstream
-#   @ladybugdb/core-win32-x64 (see util/build.js copyPrebuiltBinaries). That
-#   binary is an N-API addon, but on Windows it imports its napi_* symbols
+#   The win32 binaries that ship today are pulled from upstream
+#   @ladybugdb/core-win32-* (see util/build.js copyPrebuiltBinaries). Those
+#   binaries are N-API addons, but on Windows they import their napi_* symbols
 #   directly from "node.exe" with NO delay-load hook. Under Electron the host
 #   is electron.exe, so the loader cannot bind the imports and the process
 #   crashes in process.dlopen. (Linux/alpine/darwin binaries do NOT have this
@@ -14,10 +15,18 @@ name: Build Ladybug Lite for Windows (Electron-compatible)
 #   util/electron/patchWinDelayLoad.js adds /DELAYLOAD:node.exe + the delay-load
 #   hook to the cmake-js build, reproducing node-gyp's behaviour. The resulting
 #   single binary loads under BOTH Node 22 and Electron 39 (both N-API v10).
+#   The fix is architecture-independent, so it is applied to amd64 and arm64
+#   identically.
 #
-# This job builds, then gates on a plain-Node test AND an Electron smoke test,
-# and uploads the binary as an artifact. It deliberately does NOT auto-publish
-# to npm or push to the branch — promote the artifact manually once validated.
+# Both jobs build NATIVELY (host arch == target arch): amd64 on windows-2022,
+# arm64 on the GitHub-hosted windows-11-arm runner. A native build needs no
+# cross toolchain — cmake-js auto-detects the host arch and fetches the matching
+# node.lib. (To cross-compile arm64 on an amd64 dev box instead, use
+# util/electron/build-win-arm64.bat.)
+#
+# Each job gates on a plain-Node test AND an Electron smoke test, then uploads
+# the binary as an artifact. It deliberately does NOT auto-publish to npm or push
+# to the branch — promote the artifact manually once validated.
 
 on:
   workflow_dispatch:
@@ -29,8 +38,16 @@ on:
 
 jobs:
   build:
-    name: Build on win32-amd64 (Electron-compatible)
-    runs-on: windows-2022
+    name: Build win32-${{ matrix.arch }} (Electron-compatible)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-2022
+          - arch: arm64
+            runner: windows-11-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,6 +62,7 @@ jobs:
         run: |
           cmake --version || echo "cmake missing"
           node -v && yarn --version
+          node -p "'host arch = ' + process.arch"
 
       - name: Install @ladybugdb/core
         shell: bash
@@ -63,7 +81,14 @@ jobs:
         shell: bash
         run: node util/electron/patchWinDelayLoad.js lbug-src/tools/nodejs_api
 
-      - name: Build lbugjs.node from source (win32-amd64)
+      - name: Make Windows SDK arch macro arch-aware (_ARM64_ vs _AMD64_)
+        # Upstream hardcodes _AMD64_, which makes <winnt.h> pick x64 intrinsics and
+        # breaks the arm64 compiler (error C3861: 'ReadAcquire8' ...). The patch keys
+        # off the compiler target arch; on amd64 it falls back to _AMD64_ (no-op).
+        shell: bash
+        run: node util/electron/patchWinArchMacro.js lbug-src
+
+      - name: Build lbugjs.node from source (win32-${{ matrix.arch }})
         shell: bash
         env:
           LBUG_SOURCE_DIR: ${{ github.workspace }}/lbug-src
@@ -71,7 +96,7 @@ jobs:
           # `yarn build` (packaging) — it runs a destructive deleteFiles on the
           # repo root and can attempt an npm publish; the JS wrappers needed by
           # the tests are already committed.
-          OUTPUT_PATH: ${{ github.workspace }}/prebuilt/lbugjs-win32-amd64.node
+          OUTPUT_PATH: ${{ github.workspace }}/prebuilt/lbugjs-win32-${{ matrix.arch }}.node
           # Bypass the cached (non-hooked) prebuilt binary committed to the repo
           # — we explicitly want a fresh, patched build.
           LBUG_FORCE_REBUILD: "1"
@@ -80,8 +105,12 @@ jobs:
       - name: Stage built binary as lbugjs.node
         shell: bash
         run: |
-          cp -f prebuilt/lbugjs-win32-amd64.node lbugjs.node
-          node -e "console.log('built win32 binary size =', require('fs').statSync('lbugjs.node').size)"
+          cp -f "prebuilt/lbugjs-win32-${{ matrix.arch }}.node" lbugjs.node
+          node -e "console.log('built win32-${{ matrix.arch }} binary size =', require('fs').statSync('lbugjs.node').size)"
+
+      - name: Verify Electron compatibility (static PE check)
+        shell: bash
+        run: node util/electron/check-electron-compat.js "prebuilt/lbugjs-win32-${{ matrix.arch }}.node"
 
       - name: Test under plain Node 22
         shell: bash
@@ -103,6 +132,6 @@ jobs:
       - name: Upload Electron-compatible binary
         uses: actions/upload-artifact@v4
         with:
-          name: lbugjs-win32-amd64-electron
-          path: prebuilt/lbugjs-win32-amd64.node
+          name: lbugjs-win32-${{ matrix.arch }}-electron
+          path: prebuilt/lbugjs-win32-${{ matrix.arch }}.node
           if-no-files-found: error

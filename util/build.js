@@ -140,9 +140,10 @@ const copyPrebuiltBinaries = () => {
 
   const platformPackages = [
     "core-darwin-arm64",
+    "core-darwin-x64",
     "core-linux-arm64",
     "core-linux-x64",
-    "core-win32-x64",
+    "core-win32-x64"
   ];
 
   // When the Windows Electron-compatible binary has been built locally (see

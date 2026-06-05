@@ -5,4 +5,5 @@ demo_*
 lbugjs.node
 test
 docs/*
-lbug-src
+lbug-src/
+build-arm64.log
