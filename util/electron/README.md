@@ -78,38 +78,39 @@ There is no C++ toolchain assumption on the dev machine — build it in CI:
   `LBUG_SKIP_WIN32_PREBUILT=1` so `util/build.js` keeps the patched binary
   instead of re-fetching the upstream non-hooked one.
 
-### Build amd64 locally (native)
+### Build locally with `build-win.bat`
 
-Install VS 2022 (C++ workload) + CMake, then:
+One script builds either arch as a self-contained, Electron-compatible binary:
 
-```bash
-yarn add @ladybugdb/core --ignore-scripts
-LBUG_SUBMODULES=tools/nodejs_api yarn clone:source
-node util/electron/patchWinDelayLoad.js lbug-src/tools/nodejs_api
-LBUG_FORCE_REBUILD=1 \
-  LBUG_SOURCE_DIR="$PWD/lbug-src" \
-  OUTPUT_PATH="$PWD/prebuilt/lbugjs-win32-amd64.node" \
-  yarn build:native
+```bat
+set LBUG_SUBMODULES=tools/nodejs_api
+yarn clone:source
+pushd lbug-src\tools\nodejs_api && npm install && popd
+
+util\electron\build-win.bat amd64    REM -> prebuilt\lbugjs-win32-amd64.node
+util\electron\build-win.bat arm64    REM -> prebuilt\lbugjs-win32-arm64.node
+util\electron\build-win.bat          REM defaults to amd64
 ```
 
-### Cross-compile arm64 on an amd64 box
+All output is logged to `.\build-<arch>.log`. Env knobs: `LBUG_CRT=MD` reverts to
+the dynamic CRT; `LBUG_VSINSTALL=<path>` pins the VS install (see toolset note
+below). What the script does:
 
-The CI `arm64` job builds natively; if you want to produce `arm64` from your
-amd64 dev machine instead, use **`build-win-arm64.bat`** in this folder. It:
-
-1. uses `vswhere` to find a VS install that has the **ARM64 C++ cross build
-   tools** (component `Microsoft.VisualStudio.Component.VC.Tools.ARM64`); if
-   none is found it prints the install command and stops,
-2. sets up the `amd64_arm64` cross toolchain (`vcvarsall.bat amd64_arm64`),
-3. applies the delay-load patch and runs **`setCmakeJsArch.js … arm64`** so
-   cmake-js hands CMake the **win-arm64** `node.lib` (the upstream CMakeLists
-   calls `cmake-js print-cmakejs-lib` with no `--arch`, which would otherwise
-   target the amd64 host; cmake-js reads the target arch from the checkout's
-   `package.json` `cmake-js.arch`, **not** from `npm_config_arch`),
-4. runs **`patchWinArchMacro.js`** to fix two upstream ARM64 portability bugs
-   (see below),
-5. builds with Ninja (`-DBUILD_NODEJS=TRUE`) and writes
-   `prebuilt/lbugjs-win32-arm64.node`, then verifies it with
+1. **Picks the toolchain from host vs target arch** — native `vcvarsall amd64` /
+   `arm64`, or cross `amd64_arm64` (build arm64 on an x64 box) / `arm64_amd64`. It
+   uses `vswhere` to find a VS install with the C++ tools for the target
+   (`…VC.Tools.x86.x64` for amd64, `…VC.Tools.ARM64` for arm64) and prints the
+   install command if missing.
+2. **Delay-load patch** (`patchWinDelayLoad.js`) → loads under Node AND Electron.
+3. **`setCmakeJsArch.js <arch>`** so cmake-js hands CMake the matching `node.lib`
+   (upstream calls `cmake-js print-cmakejs-lib` with no `--arch` and would target
+   the host; cmake-js reads the target arch from the checkout's `package.json`
+   `cmake-js.arch`, **not** from `npm_config_arch`).
+4. **`patchWinArchMacro.js`** fixes two upstream ARM64 portability bugs (below;
+   no-op on amd64).
+5. **Static CRT (`/MT`)** via `-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` (below).
+6. Builds with Ninja (`-DBUILD_NODEJS=TRUE`), writes
+   `prebuilt/lbugjs-win32-<arch>.node`, and verifies it with
    `check-electron-compat.js`.
 
 #### Upstream ARM64 portability fixes (`patchWinArchMacro.js`)
@@ -130,20 +131,41 @@ ARM64 compiler and are patched to be arch-aware (keyed on the compiler target
 These fixes are arch-conditional and upstreamable. The same patch runs in the CI
 `arm64` (native `windows-11-arm`) job, which hits the identical issues.
 
-Prerequisite: clone the source and install the addon deps once first:
+#### Static CRT is required for a redistributable win32 prebuilt
 
-```bat
-set LBUG_SUBMODULES=tools/nodejs_api
-yarn clone:source
-pushd lbug-src\tools\nodejs_api && npm install && popd
+`build-win.bat` configures with `-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`
+(**`/MT`**, static CRT) by default, and CI does the same via `EXTRA_CMAKE_FLAGS`
+(forwarded by `build.js` to `make nodejs`). This is not optional for a shippable
+`.node`:
 
-util\electron\build-win-arm64.bat
-```
+- The default cmake-js/CMake build uses `/MD` (dynamic CRT), so the `.node`
+  imports `VCRUNTIME140.dll` and `MSVCP140.dll`. Those ship with the **VC++
+  Redistributable**, which is **absent on clean Windows-on-ARM machines** — and
+  official Node is itself static-CRT, so `node.exe` running is no guarantee the
+  redist is present. The `/MD` arm64 build therefore failed in `process.dlopen`
+  ("the specified module could not be found") on a real arm64 box.
+- With `/MT`, the runtime is linked in and the addon depends only on
+  `KERNEL32.dll` + `WS2_32.dll` (always present) and `node.exe` (delay-import).
+  Verified on the produced binary: no `VCRUNTIME140`/`MSVCP140`/`ucrtbase`
+  imports remain.
 
-> The amd64 host here did **not** ship the x64→arm64 cross compiler by default —
-> `build-win-arm64.bat` detects that and tells you exactly which VS component to
-> add (`Microsoft.VisualStudio.Component.VC.Tools.ARM64`). Installing it does not
-> disturb the existing amd64 toolchain.
+`/MT` is safe here because the addon links ladybug **statically** (`lbug.lib`, it
+does *not* depend on `lbug_shared.dll`), so it is a single self-contained module
+with one private CRT, and N-API never passes CRT-owned objects (allocations,
+`FILE*`, locale) across the `node.exe` boundary — the same reason node-gyp
+defaults to `/MT`.
+
+Both arches built by `build-win.bat` (and by CI) are now `/MT`. To deliberately
+produce a dynamic-CRT build, pass `LBUG_CRT=MD`.
+
+> **Toolset note:** an amd64 host does **not** ship the x64→arm64 cross compiler
+> by default — `build-win.bat arm64` detects that and prints the exact component
+> to add (`Microsoft.VisualStudio.Component.VC.Tools.ARM64`); installing it does
+> not disturb the amd64 toolchain. Also avoid the **VS 18 / MSVC 14.50**
+> prerelease toolset for arm64 — its cross compiler crashed (ICE) on heavy
+> template files where **BuildTools 2022 / MSVC 14.44** built cleanly. Pin a
+> known-good install with `LBUG_VSINSTALL` if `vswhere -latest` selects a
+> prerelease.
 
 ## Verifying under Electron
 

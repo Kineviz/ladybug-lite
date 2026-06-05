@@ -21,8 +21,8 @@ name: Build Ladybug Lite for Windows (Electron-compatible)
 # Both jobs build NATIVELY (host arch == target arch): amd64 on windows-2022,
 # arm64 on the GitHub-hosted windows-11-arm runner. A native build needs no
 # cross toolchain — cmake-js auto-detects the host arch and fetches the matching
-# node.lib. (To cross-compile arm64 on an amd64 dev box instead, use
-# util/electron/build-win-arm64.bat.)
+# node.lib. (To build either arch locally, incl. cross-compiling arm64 on an
+# amd64 dev box, use util/electron/build-win.bat <amd64|arm64>.)
 #
 # Each job gates on a plain-Node test AND an Electron smoke test, then uploads
 # the binary as an artifact. It deliberately does NOT auto-publish to npm or push
@@ -100,6 +100,13 @@ jobs:
           # Bypass the cached (non-hooked) prebuilt binary committed to the repo
           # — we explicitly want a fresh, patched build.
           LBUG_FORCE_REBUILD: "1"
+          # Statically link the C/C++ runtime (/MT) so the .node is self-contained
+          # and does NOT depend on VCRUNTIME140.dll / MSVCP140.dll. Those redist
+          # DLLs are absent on clean machines (esp. Windows-on-ARM), which makes a
+          # /MD build fail in process.dlopen. build.js forwards EXTRA_CMAKE_FLAGS
+          # to `make nodejs` -> the upstream root CMakeLists. Needs CMP0091=NEW,
+          # satisfied by the upstream cmake_minimum_required(VERSION 3.15).
+          EXTRA_CMAKE_FLAGS: "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
         run: yarn build:native
 
       - name: Stage built binary as lbugjs.node
